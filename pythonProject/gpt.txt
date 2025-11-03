@@ -1,0 +1,422 @@
+Absolutely — let’s build a clean, extensible Python normalization layer you can drop into your project. It’s vendor-agnostic by design, with adapters for Siemens & Spectrum Dynamics, provenance + confidence, and a simple CLI to run over folders.
+Below is a compact but production-ready scaffold you can paste into a repo and iterate on.
+
+1) Project layout (suggested)
+
+petdb/
+  __init__.py
+  canonical.py            # canonical models + helpers
+  adapters/
+    __init__.py
+    base.py               # adapter interface
+    standard_nm.py        # standard DICOM NM/PET (vendor-neutral)
+    siemens_pet_dose.py   # Siemens PET dose-report (Secondary Capture)
+    siemens_ct.py         # Siemens CT specifics (optional now)
+    spectrum_dyn.py       # Spectrum Dynamics (stub + TODOs)
+  normalize.py            # normalizer orchestrator
+  store_sqlite.py         # persistence (SQLite)
+  cli.py                  # command-line entry point
+Install deps:
+
+pip install pydicom
+
+2) Canonical model (vendor-neutral) — canonical.py
+
+# petdb/canonical.py
+from __future__ import annotations
+from dataclasses import dataclass, field, asdict
+from typing import Optional, Dict, Any
+
+@dataclass
+class CanonicalNucMed:
+    # Series-level canonical
+    study_uid: Optional[str] = None
+    series_uid: Optional[str] = None
+    modality: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model_name: Optional[str] = None
+
+    # PET/SPECT essentials
+    radiopharmaceutical: Optional[str] = None
+    injected_activity_bq: Optional[float] = None
+    injection_time_tm: Optional[str] = None      # DICOM TM "HHMMSS.frac"
+    injection_date_da: Optional[str] = None      # DICOM DA "YYYYMMDD"
+    acquisition_time_tm: Optional[str] = None
+    decay_correction: Optional[str] = None
+    half_life_s: Optional[float] = None
+    patient_weight_kg: Optional[float] = None
+    inj_to_scan_delay_s: Optional[float] = None  # derived
+
+    # meta
+    confidence: float = 0.0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+3) Adapter interface — adapters/base.py
+
+# petdb/adapters/base.py
+from __future__ import annotations
+from typing import Optional
+from pydicom.dataset import Dataset
+from ..canonical import CanonicalNucMed
+
+class Adapter:
+    """Base interface: if adapter recognizes the dataset, return a CanonicalNucMed (partial or full)."""
+    name: str = "base"
+
+    def matches(self, ds: Dataset) -> bool:
+        raise NotImplementedError
+
+    def extract(self, ds: Dataset) -> Optional[CanonicalNucMed]:
+        raise NotImplementedError
+
+
+4) Standard vendor-neutral PET/SPECT adapter — adapters/standard_nm.py
+
+# petdb/adapters/standard_nm.py
+from __future__ import annotations
+from typing import Optional
+from pydicom.dataset import Dataset
+from ..canonical import CanonicalNucMed
+
+def _parse_tm(tm: Optional[str]) -> Optional[float]:
+    if not tm: return None
+    tm = tm.strip()
+    # HHMMSS.frac
+    if len(tm) < 6: return None
+    try:
+        hh, mm, ss = int(tm[0:2]), int(tm[2:4]), int(tm[4:6])
+        frac = float("0" + tm[6:]) if len(tm) > 6 else 0.0
+        return hh*3600 + mm*60 + ss + frac
+    except Exception:
+        return None
+
+class StandardNMAdapter:
+    name = "standard_nm"
+
+    def matches(self, ds: Dataset) -> bool:
+        # NM or PT modalities typically; still useful for some CT companions if Radiopharm seq present
+        mod = getattr(ds, "Modality", "")
+        return mod in {"NM", "PT"}
+
+    def extract(self, ds: Dataset) -> Optional[CanonicalNucMed]:
+        c = CanonicalNucMed()
+        c.study_uid  = getattr(ds, "StudyInstanceUID", None)
+        c.series_uid = getattr(ds, "SeriesInstanceUID", None)
+        c.modality   = getattr(ds, "Modality", None)
+        c.manufacturer = getattr(ds, "Manufacturer", None)
+        c.model_name   = getattr(ds, "ManufacturerModelName", None)
+        c.decay_correction = getattr(ds, "DecayCorrection", None)
+        c.patient_weight_kg = getattr(ds, "PatientWeight", None)
+        c.acquisition_time_tm = getattr(ds, "AcquisitionTime", None)
+
+        # Radiopharm seq
+        prov = {}
+        if "RadiopharmaceuticalInformationSequence" in ds:
+            try:
+                r = ds.RadiopharmaceuticalInformationSequence[0]
+                c.radiopharmaceutical = getattr(r, "Radiopharmaceutical", None) or getattr(r, "RadiopharmaceuticalAgent", None)
+                c.injection_time_tm   = getattr(r, "RadiopharmaceuticalStartTime", None)
+                c.half_life_s         = getattr(r, "RadionuclideHalfLife", None)
+                # Older datasets: RadionuclideTotalDose sometimes stores activity (Bq)
+                c.injected_activity_bq = getattr(r, "RadionuclideTotalDose", None)
+                prov["radiopharmaceutical"] = {"src":"(0054,0016)[0].Radiopharmaceutical", "conf":1.0}
+                prov["injection_time_tm"]   = {"src":"(0054,0016)[0].RadiopharmaceuticalStartTime", "conf":1.0}
+                prov["half_life_s"]         = {"src":"(0018,1075)", "conf":1.0}
+                if c.injected_activity_bq is not None:
+                    prov["injected_activity_bq"] = {"src":"(0018,1074) total dose", "conf":0.8}
+            except Exception:
+                pass
+
+        # derive delay if possible
+        inj_s = _parse_tm(c.injection_time_tm)
+        acq_s = _parse_tm(c.acquisition_time_tm)
+        if inj_s is not None and acq_s is not None:
+            c.inj_to_scan_delay_s = max(0.0, acq_s - inj_s)
+            prov["inj_to_scan_delay_s"] = {"src":"derived TM", "conf":1.0}
+
+        c.provenance = prov
+        # confidence: 1.0 if we got key fields; else partial
+        got_core = (c.radiopharmaceutical or c.injected_activity_bq or c.injection_time_tm)
+        c.confidence = 1.0 if got_core else 0.6
+        return c
+
+5) Siemens PET dose-report adapter — adapters/siemens_pet_dose.py
+(Parses text from private OB like (0029,1010) in Secondary Capture dose reports; you provided such examples.)
+
+# petdb/adapters/siemens_pet_dose.py
+from __future__ import annotations
+import re
+from typing import Optional
+from pydicom.dataset import Dataset
+from ..canonical import CanonicalNucMed
+
+_SC = "1.2.840.10008.5.1.4.1.1.7"  # SecondaryCaptureImageStorage
+_RX_ACTIVITY = re.compile(r"Injected\s*Dose\s*[:=]?\s*([\d.,]+)\s*(MBq|kBq|Bq)", re.I)
+_RX_TIME     = re.compile(r"(Inj\.\s*Start\s*Time|Injection\s*Time)\s*[:=]?\s*([0-2]?\d:[0-5]\d:[0-5]\d)", re.I)
+_RX_DATE     = re.compile(r"(Inj\.\s*Start\s*Date|Injection\s*Date)\s*[:=]?\s*([0-3]?\d[-./][0-1]?\d[-./]\d{4})", re.I)
+_RX_RP       = re.compile(r"Radiopharm\w*\s*[:=]?\s*([A-Za-z0-9\-\s]+)", re.I)
+_RX_WEIGHT   = re.compile(r"(Weight)\s*[:=]?\s*([\d.,]+)\s*(kg|KG)", re.I)
+
+def _decode(v) -> str:
+    if isinstance(v, (bytes, bytearray)):
+        try: return v.decode("utf-8", "ignore")
+        except Exception: return v.decode("latin-1", "ignore")
+    return str(v)
+
+def _to_bq(num: str, unit: str) -> float:
+    x = float(num.replace(",", "."))
+    u = unit.lower()
+    if u == "mbq": return x * 1e6
+    if u == "kbq": return x * 1e3
+    return x
+
+class SiemensPETDoseAdapter:
+    name = "siemens_pet_dose"
+
+    def matches(self, ds: Dataset) -> bool:
+        manu = (getattr(ds, "Manufacturer", "") or "").upper()
+        sop  = getattr(ds, "SOPClassUID", "")
+        desc = (getattr(ds, "SeriesDescription", "") or "").lower()
+        return "SIEMENS" in manu and sop == _SC and "dose" in desc
+
+    def extract(self, ds: Dataset) -> Optional[CanonicalNucMed]:
+        # find text payload in Siemens private OBs (commonly 0029,1010 or 0029,1210)
+        text = ""
+        for tag in [(0x0029,0x1010), (0x0029,0x1210)]:
+            if tag in ds:
+                text = _decode(ds[tag].value)
+                if "Radiopharm" in text or "Injected" in text or "MBq" in text:
+                    break
+        if not text:
+            return None
+
+        c = CanonicalNucMed()
+        c.study_uid  = getattr(ds, "StudyInstanceUID", None)
+        c.series_uid = getattr(ds, "SeriesInstanceUID", None)
+        c.modality   = getattr(ds, "Modality", None)
+        c.manufacturer = getattr(ds, "Manufacturer", None)
+        c.model_name   = getattr(ds, "ManufacturerModelName", None)
+        c.provenance = {"source":"(0029,1010/1210) Siemens dose text", "conf":0.9}
+
+        m = _RX_RP.search(text)
+        if m: c.radiopharmaceutical = m.group(1).strip()
+
+        m = _RX_ACTIVITY.search(text)
+        if m: c.injected_activity_bq = _to_bq(m.group(1), m.group(2))
+
+        m = _RX_TIME.search(text)
+        if m: c.injection_time_tm = m.group(2).replace(":","")
+
+        # injection date to DICOM DA YYYYMMDD (best-effort)
+        m = _RX_DATE.search(text)
+        if m:
+            d = m.group(2).replace(".", "-").replace("/", "-")
+            # naive: dd-mm-yyyy → yyyymmdd
+            try:
+                dd, mm, yyyy = d.split("-")
+                if len(yyyy)==4: c.injection_date_da = f"{yyyy}{mm.zfill(2)}{dd.zfill(2)}"
+            except Exception:
+                pass
+
+        # prefer standard PatientWeight if present; else parse text
+        w = getattr(ds, "PatientWeight", None)
+        if w is not None:
+            c.patient_weight_kg = float(w)
+        else:
+            m = _RX_WEIGHT.search(text)
+            if m: c.patient_weight_kg = float(m.group(2).replace(",", "."))
+
+        c.confidence = 0.9
+        return c
+
+
+6) Spectrum Dynamics adapter (stub) — adapters/spectrum_dyn.py
+Fill in once you inspect one dcmdump (private creator strings differ across systems).
+
+# petdb/adapters/spectrum_dyn.py
+from __future__ import annotations
+from typing import Optional
+from pydicom.dataset import Dataset
+from ..canonical import CanonicalNucMed
+
+class SpectrumDynAdapter:
+    name = "spectrum_dynamics"
+
+    def matches(self, ds: Dataset) -> bool:
+        manu = (getattr(ds, "Manufacturer", "") or "").upper()
+        return "SPECTRUM" in manu
+
+    def extract(self, ds: Dataset) -> Optional[CanonicalNucMed]:
+        # TODO: after inspecting private creators and offsets, parse activity/time/weight.
+        c = CanonicalNucMed()
+        c.study_uid  = getattr(ds, "StudyInstanceUID", None)
+        c.series_uid = getattr(ds, "SeriesInstanceUID", None)
+        c.modality   = getattr(ds, "Modality", None)
+        c.manufacturer = getattr(ds, "Manufacturer", None)
+        c.model_name   = getattr(ds, "ManufacturerModelName", None)
+        # Try standard fields first (if NM/PT and Radiopharm seq exists)
+        # Otherwise, inspect private creators & parse strings (similar to Siemens dose)
+        c.confidence = 0.5
+        return c
+
+7) Normalizer orchestrator — normalize.py
+Registers adapters and merges partial results (standard + vendor-specific). Keeps best field + provenance.
+
+# petdb/normalize.py
+from __future__ import annotations
+from typing import List, Optional
+from pydicom.dataset import Dataset
+from .canonical import CanonicalNucMed
+from .adapters.standard_nm import StandardNMAdapter
+from .adapters.siemens_pet_dose import SiemensPETDoseAdapter
+from .adapters.spectrum_dyn import SpectrumDynAdapter
+
+ADAPTERS = [
+    SiemensPETDoseAdapter(),
+    StandardNMAdapter(),
+    SpectrumDynAdapter(),
+]
+
+def merge(best: CanonicalNucMed, new: CanonicalNucMed) -> CanonicalNucMed:
+    # choose non-null with higher confidence; merge provenance
+    for field in best.__dataclass_fields__:
+        if field in {"provenance", "confidence"}: continue
+        a = getattr(best, field)
+        b = getattr(new, field)
+        if b is not None and (a is None):
+            setattr(best, field, b)
+    # keep the higher overall confidence
+    if new.confidence > best.confidence:
+        best.confidence = new.confidence
+    # provenance merge
+    best.provenance.update(getattr(new, "provenance", {}) or {})
+    return best
+
+def normalize_one(ds: Dataset) -> Optional[CanonicalNucMed]:
+    out: Optional[CanonicalNucMed] = None
+    for ad in ADAPTERS:
+        if ad.matches(ds):
+            c = ad.extract(ds)
+            if c:
+                out = merge(out, c) if out else c
+    return out
+
+8) SQLite persistence — store_sqlite.py
+
+# petdb/store_sqlite.py
+import sqlite3, json
+from typing import Optional
+from .canonical import CanonicalNucMed
+
+DDL = """
+CREATE TABLE IF NOT EXISTS canonical_nucmed (
+  series_uid TEXT PRIMARY KEY,
+  study_uid TEXT,
+  modality TEXT, manufacturer TEXT, model_name TEXT,
+  radiopharmaceutical TEXT,
+  injected_activity_bq REAL,
+  injection_time_tm TEXT,
+  injection_date_da TEXT,
+  acquisition_time_tm TEXT,
+  decay_correction TEXT,
+  half_life_s REAL,
+  patient_weight_kg REAL,
+  inj_to_scan_delay_s REAL,
+  confidence REAL,
+  provenance TEXT
+);
+"""
+
+def open_db(path="petdb.sqlite"):
+    con = sqlite3.connect(path)
+    con.execute(DDL); con.commit()
+    return con
+
+def upsert(con, c: CanonicalNucMed):
+    d = c.to_dict()
+    d["provenance"] = json.dumps(d["provenance"] or {})
+    con.execute("""
+    INSERT INTO canonical_nucmed
+    (series_uid, study_uid, modality, manufacturer, model_name,
+     radiopharmaceutical, injected_activity_bq, injection_time_tm, injection_date_da,
+     acquisition_time_tm, decay_correction, half_life_s, patient_weight_kg,
+     inj_to_scan_delay_s, confidence, provenance)
+    VALUES
+    (:series_uid, :study_uid, :modality, :manufacturer, :model_name,
+     :radiopharmaceutical, :injected_activity_bq, :injection_time_tm, :injection_date_da,
+     :acquisition_time_tm, :decay_correction, :half_life_s, :patient_weight_kg,
+     :inj_to_scan_delay_s, :confidence, :provenance)
+    ON CONFLICT(series_uid) DO UPDATE SET
+      study_uid=excluded.study_uid,
+      modality=excluded.modality,
+      manufacturer=excluded.manufacturer,
+      model_name=excluded.model_name,
+      radiopharmaceutical=COALESCE(excluded.radiopharmaceutical, canonical_nucmed.radiopharmaceutical),
+      injected_activity_bq=COALESCE(excluded.injected_activity_bq, canonical_nucmed.injected_activity_bq),
+      injection_time_tm=COALESCE(excluded.injection_time_tm, canonical_nucmed.injection_time_tm),
+      injection_date_da=COALESCE(excluded.injection_date_da, canonical_nucmed.injection_date_da),
+      acquisition_time_tm=COALESCE(excluded.acquisition_time_tm, canonical_nucmed.acquisition_time_tm),
+      decay_correction=COALESCE(excluded.decay_correction, canonical_nucmed.decay_correction),
+      half_life_s=COALESCE(excluded.half_life_s, canonical_nucmed.half_life_s),
+      patient_weight_kg=COALESCE(excluded.patient_weight_kg, canonical_nucmed.patient_weight_kg),
+      inj_to_scan_delay_s=COALESCE(excluded.inj_to_scan_delay_s, canonical_nucmed.inj_to_scan_delay_s),
+      confidence=MAX(canonical_nucmed.confidence, excluded.confidence),
+      provenance=excluded.provenance
+    """, d)
+    con.commit()
+
+
+    9) CLI runner — cli.py
+
+# petdb/cli.py
+import argparse, os
+from pathlib import Path
+import pydicom
+from .normalize import normalize_one
+from .store_sqlite import open_db, upsert
+
+def main():
+    ap = argparse.ArgumentParser(description="Normalize PET/SPECT DICOM metadata into canonical DB.")
+    ap.add_argument("root", help="Directory with DICOMs (exam or repository root)")
+    ap.add_argument("--db", default="petdb.sqlite", help="SQLite output path")
+    args = ap.parse_args()
+
+    con = open_db(args.db)
+    root = Path(args.root)
+
+    series_seen = set()
+    for d, _, fs in os.walk(root):
+        for f in fs:
+            p = Path(d) / f
+            if p.suffix.lower() != ".dcm": continue
+            try:
+                ds = pydicom.dcmread(str(p), stop_before_pixels=True, force=False)
+            except Exception:
+                continue
+            c = normalize_one(ds)
+            if c and c.series_uid and c.series_uid not in series_seen:
+                upsert(con, c)
+                series_seen.add(c.series_uid)
+
+    print(f"Normalized series written: {len(series_seen)} to {args.db}")
+
+if __name__ == "__main__":
+    main()
+Run it:
+
+python -m petdb.cli /path/to/exam_or_repo --db petdb.sqlite
+
+Notes & next steps
+* Why series-level? PET/SPECT metadata is logically constant within a series; normalizing once per series is enough. You can switch to per-study if needed.
+* Provenance & confidence are built-in. When you add Spectrum Dynamics private parsing, bump confidence to 0.8–0.95 for those fields.
+* Extending adapters: add a new file in adapters/, implement matches() + extract(), and register it in normalize.py::ADAPTERS.
+* Validation: Create a quick notebook to spot-check petdb.sqlite (counts by manufacturer, missing fields, etc.).
+* Web layer: your web UI can read directly from petdb.sqlite (or Postgres later).
+If you paste this scaffold into a repo, you can start normalizing today with Siemens (standard + dose-report) and fill in Spectrum Dynamics once you inspect one of their dcmdumps. Want me to add a minimal FastAPI endpoint to query the normalized table next?
+
+
+
+
