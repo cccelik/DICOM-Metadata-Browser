@@ -142,14 +142,14 @@
         <header>
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <h1>📊 DICOM Metadata Browser</h1>
+                    <h1>DICOM Metadata Browser</h1>
                     <p class="subtitle">Database: {{ db_path }}</p>
                 </div>
                 <button id="upload-toggle-btn" onclick="toggleUploadZone()" 
                         style="padding: 12px 24px; background: #27ae60; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: 500; transition: background 0.2s;"
                         onmouseover="this.style.background='#229954'"
                         onmouseout="this.style.background='#27ae60'">
-                    📤 Upload
+                    Upload
                 </button>
             </div>
         </header>
@@ -159,7 +159,6 @@
              ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" onclick="document.getElementById('file-input').click()">
             <input type="file" id="file-input" accept=".zip,.7z" style="display: none;" onchange="handleFileSelect(event)">
             <div id="upload-content">
-                <div style="font-size: 48px; margin-bottom: 10px;">📦</div>
                 <h3 style="margin: 10px 0; color: #2c3e50;">Drop ZIP or 7Z files here</h3>
                 <p style="color: #7f8c8d; margin: 5px 0;">or click to browse</p>
                 <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">Supports: .zip, .7z</p>
@@ -190,7 +189,7 @@
                     type="submit" 
                     style="padding: 12px 24px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: 500;"
                 >
-                    🔍 Search
+                    Search
                 </button>
                 {% if search_term %}
                 <a 
@@ -215,7 +214,7 @@
         
         {% if deleted == '1' %}
         <div style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
-            <strong>✓ Success:</strong> Study deleted successfully ({{ deleted_count }} series removed).
+            <strong>Success:</strong> Study deleted successfully ({{ deleted_count }} series removed).
         </div>
         {% endif %}
         
@@ -309,13 +308,13 @@
         function toggleUploadZone() {
             if (uploadZone.style.display === 'none' || uploadZone.style.display === '') {
                 uploadZone.style.display = 'block';
-                uploadToggleBtn.textContent = '✕ Close Upload';
+                uploadToggleBtn.textContent = 'Close Upload';
                 uploadToggleBtn.style.background = '#e74c3c';
                 uploadToggleBtn.onmouseover = function() { this.style.background = '#c0392b'; };
                 uploadToggleBtn.onmouseout = function() { this.style.background = '#e74c3c'; };
             } else {
                 uploadZone.style.display = 'none';
-                uploadToggleBtn.textContent = '📤 Upload';
+                uploadToggleBtn.textContent = 'Upload';
                 uploadToggleBtn.style.background = '#27ae60';
                 uploadToggleBtn.onmouseover = function() { this.style.background = '#229954'; };
                 uploadToggleBtn.onmouseout = function() { this.style.background = '#27ae60'; };
@@ -386,12 +385,12 @@
             .then(data => {
                 if (data.success) {
                     progressBar.style.width = '100%';
-                    progressText.textContent = `✓ ${data.message}`;
+                    progressText.textContent = `Success: ${data.message}`;
                     setTimeout(() => {
                         window.location.reload();
                     }, 1500);
                 } else {
-                    progressText.textContent = `✗ Error: ${data.message}`;
+                    progressText.textContent = `Error: ${data.message}`;
                     progressBar.style.background = '#e74c3c';
                     setTimeout(() => {
                         uploadContent.style.display = 'block';
@@ -402,7 +401,7 @@
                 }
             })
             .catch(error => {
-                progressText.textContent = `✗ Error: ${error.message}`;
+                progressText.textContent = `Error: ${error.message}`;
                 progressBar.style.background = '#e74c3c';
                 setTimeout(() => {
                     uploadContent.style.display = 'block';

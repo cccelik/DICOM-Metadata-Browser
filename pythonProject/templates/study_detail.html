@@ -185,7 +185,7 @@
                         style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500;"
                         onmouseover="this.style.background='#c0392b'"
                         onmouseout="this.style.background='#e74c3c'">
-                    🗑️ Delete Study
+                    Delete Study
                 </button>
             </form>
         </div>
@@ -217,7 +217,7 @@
         </div>
         
         <div class="info-section">
-            <h2>👤 Patient Information</h2>
+            <h2>Patient Information</h2>
             <div class="info-row">
                 <span class="info-label">Patient Name:</span>
                 <span class="info-value">{{ study_info.patient_name or 'N/A' }}</span>
@@ -273,7 +273,7 @@
         </div>
         
         <div class="info-section">
-            <h2>🏥 Study Information</h2>
+            <h2>Study Information</h2>
             <div class="info-row">
                 <span class="info-label">Study Date:</span>
                 <span class="info-value">{{ study_info.study_date_formatted or study_info.study_date or 'N/A' }}</span>
@@ -307,7 +307,7 @@
         </div>
         
         <div class="info-section">
-            <h2>🏭 Manufacturer Information</h2>
+            <h2>Manufacturer Information</h2>
             <div class="info-row">
                 <span class="info-label">Manufacturer:</span>
                 <span class="info-value">{{ study_info.manufacturer or 'N/A' }}</span>
@@ -324,7 +324,7 @@
         
         
         <div class="info-section">
-            <h2>📋 Series ({{ series|length }})</h2>
+            <h2>Series ({{ series|length }})</h2>
             {% if series %}
             <div class="series-table">
                 <table>
@@ -435,7 +435,7 @@
                                     
                                     {% if s.radiopharmaceutical or s.injected_activity or s.decay_correction %}
                                     <div style="margin-top: 15px; margin-bottom: 15px; padding-top: 15px; padding-bottom: 15px; border-top: 1px solid #dee2e6; border-bottom: 1px solid #dee2e6;">
-                                        <strong style="color: #2c3e50; font-size: 14px;">💊 Nuclear Medicine Information</strong>
+                                        <strong style="color: #2c3e50; font-size: 14px;">Nuclear Medicine Information</strong>
                                     </div>
                                     {% if s.radiopharmaceutical %}
                                     <strong>Radiopharmaceutical:</strong> {{ s.radiopharmaceutical }}<br>

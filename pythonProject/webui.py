@@ -783,7 +783,7 @@ def format_delay(minutes):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
-    print(f"🌐 Starting DICOM Metadata Browser on http://127.0.0.1:{port}")
-    print(f"📊 Using database: {DEFAULT_DB}")
+    print(f"Starting DICOM Metadata Browser on http://127.0.0.1:{port}")
+    print(f"Using database: {DEFAULT_DB}")
     app.run(debug=False, host='127.0.0.1', port=port)
 
