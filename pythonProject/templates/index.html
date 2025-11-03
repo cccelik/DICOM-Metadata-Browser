@@ -142,15 +142,28 @@
         <header>
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <h1>DICOM Metadata Browser</h1>
-                    <p class="subtitle">Database: {{ db_path }}</p>
+                    <h1>{{ t.title }}</h1>
+                    <p class="subtitle">{{ t.database }}: {{ db_path }}</p>
                 </div>
-                <button id="upload-toggle-btn" onclick="toggleUploadZone()" 
-                        style="padding: 12px 24px; background: #27ae60; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: 500; transition: background 0.2s;"
-                        onmouseover="this.style.background='#229954'"
-                        onmouseout="this.style.background='#27ae60'">
-                    Upload
-                </button>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <!-- Language Switcher -->
+                    <div style="display: flex; gap: 5px; background: #ecf0f1; padding: 4px; border-radius: 6px;">
+                        <a href="/?lang=en&db={{ db_path }}" 
+                           style="padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; {% if lang == 'en' %}background: #3498db; color: white; font-weight: 500;{% else %}color: #7f8c8d;{% endif %}">
+                            EN
+                        </a>
+                        <a href="/?lang=de&db={{ db_path }}" 
+                           style="padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; {% if lang == 'de' %}background: #3498db; color: white; font-weight: 500;{% else %}color: #7f8c8d;{% endif %}">
+                            DE
+                        </a>
+                    </div>
+                    <button id="upload-toggle-btn" onclick="toggleUploadZone()" 
+                            style="padding: 12px 24px; background: #27ae60; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: 500; transition: background 0.2s;"
+                            onmouseover="this.style.background='#229954'"
+                            onmouseout="this.style.background='#27ae60'">
+                        {{ t.upload }}
+                    </button>
+                </div>
             </div>
         </header>
         
@@ -159,9 +172,9 @@
              ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" onclick="document.getElementById('file-input').click()">
             <input type="file" id="file-input" accept=".zip,.7z" style="display: none;" onchange="handleFileSelect(event)">
             <div id="upload-content">
-                <h3 style="margin: 10px 0; color: #2c3e50;">Drop ZIP or 7Z files here</h3>
-                <p style="color: #7f8c8d; margin: 5px 0;">or click to browse</p>
-                <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">Supports: .zip, .7z</p>
+                <h3 style="margin: 10px 0; color: #2c3e50;">{{ t.drop_files }}</h3>
+                <p style="color: #7f8c8d; margin: 5px 0;">{{ t.click_to_browse }}</p>
+                <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">{{ t.supports }}</p>
             </div>
             <div id="upload-progress" style="display: none;">
                 <div style="margin: 20px 0;">
@@ -180,7 +193,7 @@
                 <input 
                     type="text" 
                     name="search" 
-                    placeholder="Search by patient name, ID, modality, radiopharmaceutical, manufacturer..." 
+                    placeholder="{{ t.search_placeholder }}" 
                     value="{{ search_term or '' }}"
                     style="flex: 1; padding: 12px; border: 2px solid #ddd; border-radius: 6px; font-size: 16px;"
                     autofocus
@@ -189,24 +202,24 @@
                     type="submit" 
                     style="padding: 12px 24px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: 500;"
                 >
-                    Search
+                    {{ t.search }}
                 </button>
                 {% if search_term %}
                 <a 
-                    href="/?db={{ db_path }}" 
+                    href="/?db={{ db_path }}&lang={{ lang }}" 
                     style="padding: 12px 20px; background: #95a5a6; color: white; border-radius: 6px; text-decoration: none; font-size: 16px;"
                 >
-                    Clear
+                    {{ t.clear }}
                 </a>
                 {% endif %}
             </form>
             {% if search_term %}
             <p style="margin-top: 10px; color: #7f8c8d; font-size: 14px;">
-                Searching for: <strong>{{ search_term }}</strong>
+                {{ t.searching_for }}: <strong>{{ search_term }}</strong>
                 {% if studies %}
-                    <span style="color: #27ae60;">({{ studies|length }} result{% if studies|length != 1 %}s{% endif %} found)</span>
+                    <span style="color: #27ae60;">({{ studies|length }} {{ t.results_found }})</span>
                 {% else %}
-                    <span style="color: #e74c3c;">(no results)</span>
+                    <span style="color: #e74c3c;">({{ t.no_results }})</span>
                 {% endif %}
             </p>
             {% endif %}
@@ -214,7 +227,7 @@
         
         {% if deleted == '1' %}
         <div style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
-            <strong>Success:</strong> Study deleted successfully ({{ deleted_count }} series removed).
+            <strong>{{ t.success }}:</strong> {{ t.study_deleted }} ({{ deleted_count }} {{ t.series_removed }}).
         </div>
         {% endif %}
         
@@ -227,7 +240,7 @@
         {% if studies %}
         <div class="studies-grid">
             {% for study in studies %}
-            <a href="/study/{{ study.study_instance_uid }}?db={{ db_path }}">
+            <a href="/study/{{ study.study_instance_uid }}?db={{ db_path }}&lang={{ lang }}">
                 <div class="study-card">
                     <h3>
                         {% if study.patient_name_display %}
@@ -240,22 +253,22 @@
                     </h3>
                     <div class="study-info">
                         <div class="info-row">
-                            <span class="info-label">Patient ID:</span>
+                            <span class="info-label">{{ t.patient_id }}:</span>
                             <span class="info-value">{{ study.patient_id or 'N/A' }}</span>
                         </div>
                         <div class="info-row">
-                            <span class="info-label">Study Date:</span>
+                            <span class="info-label">{{ t.study_date }}:</span>
                             <span class="info-value">{{ study.study_date_formatted or study.study_date or 'N/A' }}</span>
                         </div>
                         {% if study.study_time_formatted %}
                         <div class="info-row">
-                            <span class="info-label">Time:</span>
+                            <span class="info-label">{{ t.study_time }}:</span>
                             <span class="info-value">{{ study.study_time_formatted }}</span>
                         </div>
                         {% endif %}
                         {% if study.study_description %}
                         <div class="info-row">
-                            <span class="info-label">Description:</span>
+                            <span class="info-label">{{ t.description }}:</span>
                             <span class="info-value" style="font-size: 12px;">{{ study.study_description[:50] }}{% if study.study_description|length > 50 %}...{% endif %}</span>
                         </div>
                         {% endif %}
@@ -269,7 +282,7 @@
                             {% if study.radiopharmaceutical %}
                             <span class="badge" style="background: #16a085; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px;">{{ study.radiopharmaceutical[:15] }}{% if study.radiopharmaceutical|length > 15 %}...{% endif %}</span>
                             {% endif %}
-                            <span class="badge series-count">{{ study.series_count }} series</span>
+                            <span class="badge series-count">{{ study.series_count }} {{ t.series }}</span>
                         </div>
                         {% if search_term and study.match_score %}
                         <div style="margin-top: 8px; font-size: 11px; color: #7f8c8d;">
@@ -284,14 +297,14 @@
         {% else %}
         <div class="empty-state">
             {% if search_term %}
-            <h2>No results found</h2>
-            <p>No studies match "<strong>{{ search_term }}</strong>"</p>
+            <h2>{{ t.no_results_found }}</h2>
+            <p>{{ t.no_matches }} "<strong>{{ search_term }}</strong>"</p>
             <p style="margin-top: 15px;">
-                <a href="/?db={{ db_path }}" style="color: #3498db; text-decoration: underline;">Show all studies</a>
+                <a href="/?db={{ db_path }}&lang={{ lang }}" style="color: #3498db; text-decoration: underline;">{{ t.show_all_studies }}</a>
             </p>
             {% else %}
-            <h2>No studies found</h2>
-            <p>Process some DICOM files first using:<br><code>python3 process_dicom.py &lt;directory&gt;</code></p>
+            <h2>{{ t.no_studies_found }}</h2>
+            <p>{{ t.process_files }}<br><code>python3 process_dicom.py &lt;directory&gt;</code></p>
             {% endif %}
         </div>
         {% endif %}
@@ -308,13 +321,13 @@
         function toggleUploadZone() {
             if (uploadZone.style.display === 'none' || uploadZone.style.display === '') {
                 uploadZone.style.display = 'block';
-                uploadToggleBtn.textContent = 'Close Upload';
+                uploadToggleBtn.textContent = '{{ t.close_upload }}';
                 uploadToggleBtn.style.background = '#e74c3c';
                 uploadToggleBtn.onmouseover = function() { this.style.background = '#c0392b'; };
                 uploadToggleBtn.onmouseout = function() { this.style.background = '#e74c3c'; };
             } else {
                 uploadZone.style.display = 'none';
-                uploadToggleBtn.textContent = 'Upload';
+                uploadToggleBtn.textContent = '{{ t.upload }}';
                 uploadToggleBtn.style.background = '#27ae60';
                 uploadToggleBtn.onmouseover = function() { this.style.background = '#229954'; };
                 uploadToggleBtn.onmouseout = function() { this.style.background = '#27ae60'; };
@@ -375,7 +388,7 @@
             uploadContent.style.display = 'none';
             uploadProgress.style.display = 'block';
             progressBar.style.width = '0%';
-            progressText.textContent = `Uploading ${file.name}...`;
+            progressText.textContent = `{{ t.uploading }} ${file.name}...`;
 
             fetch('/upload', {
                 method: 'POST',
@@ -385,12 +398,12 @@
             .then(data => {
                 if (data.success) {
                     progressBar.style.width = '100%';
-                    progressText.textContent = `Success: ${data.message}`;
+                    progressText.textContent = `{{ t.success }}: ${data.message}`;
                     setTimeout(() => {
                         window.location.reload();
                     }, 1500);
                 } else {
-                    progressText.textContent = `Error: ${data.message}`;
+                    progressText.textContent = `{{ t.error }}: ${data.message}`;
                     progressBar.style.background = '#e74c3c';
                     setTimeout(() => {
                         uploadContent.style.display = 'block';
@@ -401,7 +414,7 @@
                 }
             })
             .catch(error => {
-                progressText.textContent = `Error: ${error.message}`;
+                progressText.textContent = `{{ t.error }}: ${error.message}`;
                 progressBar.style.background = '#e74c3c';
                 setTimeout(() => {
                     uploadContent.style.display = 'block';

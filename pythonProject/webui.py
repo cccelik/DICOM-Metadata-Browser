@@ -3,7 +3,7 @@
 Clean Web UI for DICOM Metadata Browser
 """
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session, redirect
 import sqlite3
 from pathlib import Path
 import os
@@ -15,11 +15,24 @@ import zipfile
 import shutil
 from difflib import SequenceMatcher
 from process_dicom import process_directory
+from translations import get_translation
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)  # Required for sessions
 
 # Default database path
 DEFAULT_DB = "dicom_metadata.db"
+
+
+def get_language():
+    """Get current language from session or request, default to English"""
+    return session.get('language', request.args.get('lang', 'en'))
+
+
+def get_translations():
+    """Get translations for current language"""
+    lang = get_language()
+    return get_translation(lang)
 
 
 def get_db_connection(db_path=None):
@@ -98,16 +111,24 @@ def build_search_query(search_term):
     return query, [search_like] * 8
 
 
+
 @app.route('/')
 def index():
     """Main page - list all studies with optional search"""
+    # Handle language setting
+    lang = request.args.get('lang')
+    if lang and lang in ['en', 'de']:
+        session['language'] = lang
+    
     db_path = request.args.get('db', DEFAULT_DB)
     search_term = request.args.get('search', '').strip()
     deleted = request.args.get('deleted', '0')
     deleted_count = request.args.get('count', '0')
     
+    translations = get_translations()
+    
     if not os.path.exists(db_path):
-        return render_template('index.html', studies=[], db_path=db_path, error="Database not found", search_term=search_term, deleted=deleted, deleted_count=deleted_count)
+        return render_template('index.html', studies=[], db_path=db_path, error="Database not found", search_term=search_term, deleted=deleted, deleted_count=deleted_count, t=translations, lang=get_language())
     
     try:
         conn = get_db_connection(db_path)
@@ -208,15 +229,21 @@ def index():
             else:
                 study['patient_name_display'] = None
         
-        return render_template('index.html', studies=studies, db_path=db_path, search_term=search_term, deleted=deleted, deleted_count=deleted_count)
+        return render_template('index.html', studies=studies, db_path=db_path, search_term=search_term, deleted=deleted, deleted_count=deleted_count, t=translations, lang=get_language())
     except Exception as e:
-        return render_template('index.html', studies=[], db_path=db_path, error=str(e), search_term=search_term, deleted=deleted, deleted_count=deleted_count)
+        return render_template('index.html', studies=[], db_path=db_path, error=str(e), search_term=search_term, deleted=deleted, deleted_count=deleted_count, t=translations, lang=get_language())
 
 
 @app.route('/study/<study_uid>')
 def study_detail(study_uid):
     """Study detail page - show all series in a study"""
+    # Handle language setting
+    lang = request.args.get('lang')
+    if lang and lang in ['en', 'de']:
+        session['language'] = lang
+    
     db_path = request.args.get('db', DEFAULT_DB)
+    translations = get_translations()
     
     if not os.path.exists(db_path):
         return f"Database not found: {db_path}", 404
@@ -397,7 +424,9 @@ def study_detail(study_uid):
         return render_template('study_detail.html', 
                              study_info=study_info, 
                              series=series,
-                             db_path=db_path)
+                             db_path=db_path,
+                             t=translations,
+                             lang=get_language())
     except Exception as e:
         return f"Error: {str(e)}", 500
 
