@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Study Details - DICOM Metadata Browser</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #3498db;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .header-section {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .info-section {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .info-section h2 {
+            color: #2c3e50;
+            font-size: 18px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #ecf0f1;
+        }
+        
+        .info-row {
+            display: grid;
+            grid-template-columns: 150px 1fr;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .info-row:last-child {
+            border-bottom: none;
+        }
+        
+        .info-label {
+            color: #7f8c8d;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        .info-value {
+            color: #2c3e50;
+            font-size: 14px;
+            word-break: break-word;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-right: 5px;
+        }
+        
+        .badge-modality {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .badge-manufacturer {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+        
+        .series-table {
+            width: 100%;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .series-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .series-table th {
+            background: #34495e;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        .series-table td {
+            padding: 12px;
+            border-bottom: 1px solid #ecf0f1;
+            font-size: 14px;
+        }
+        
+        .series-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .series-table tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .expandable {
+            cursor: pointer;
+            color: #3498db;
+        }
+        
+        .expandable:hover {
+            text-decoration: underline;
+        }
+        
+        .json-view {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <a href="/?db={{ db_path }}" class="back-link">← Back to Studies</a>
+            <form method="POST" action="/study/{{ study_info.study_instance_uid }}/delete?db={{ db_path }}" 
+                  style="margin: 0;" 
+                  onsubmit="return confirm('Are you sure you want to delete this study and all its series? This action cannot be undone.');">
+                <button type="submit" 
+                        style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500;"
+                        onmouseover="this.style.background='#c0392b'"
+                        onmouseout="this.style.background='#e74c3c'">
+                    🗑️ Delete Study
+                </button>
+            </form>
+        </div>
+        
+        <div class="header-section">
+            <h1>
+                {% if study_info.patient_name_display %}
+                    {{ study_info.patient_name_display }}
+                {% elif study_info.patient_name %}
+                    {{ study_info.patient_name }}
+                {% else %}
+                    Study Details
+                {% endif %}
+            </h1>
+            <div class="info-grid">
+                <div>
+                    <strong>Study UID:</strong><br>
+                    <small style="color: #7f8c8d; word-break: break-all;">{{ study_info.study_instance_uid }}</small>
+                </div>
+                <div>
+                    <strong>Patient ID:</strong><br>
+                    {{ study_info.patient_id or 'N/A' }}
+                </div>
+                <div>
+                    <strong>Study Date:</strong><br>
+                    {{ study_info.study_date_formatted or study_info.study_date or 'N/A' }}
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-section">
+            <h2>👤 Patient Information</h2>
+            <div class="info-row">
+                <span class="info-label">Patient Name:</span>
+                <span class="info-value">{{ study_info.patient_name or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Patient ID:</span>
+                <span class="info-value">{{ study_info.patient_id or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Birth Date:</span>
+                <span class="info-value">{{ study_info.patient_birth_date_formatted or study_info.patient_birth_date or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Sex:</span>
+                <span class="info-value">{{ study_info.patient_sex or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Age:</span>
+                <span class="info-value">{{ study_info.patient_age or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Weight:</span>
+                <span class="info-value">{% if study_info.patient_weight %}{{ "%.2f"|format(study_info.patient_weight) }} kg{% else %}N/A{% endif %}</span>
+            </div>
+            {% if study_info.patient_size %}
+            <div class="info-row">
+                <span class="info-label">Height:</span>
+                <span class="info-value">
+                    {{ "%.2f"|format(study_info.patient_size) }} m
+                    {% if study_info.height_cm %}
+                    <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(study_info.height_cm) }} cm)</span>
+                    {% endif %}
+                </span>
+            </div>
+            {% endif %}
+            {% if study_info.bmi %}
+            <div class="info-row">
+                <span class="info-label">BMI:</span>
+                <span class="info-value">
+                    {{ "%.1f"|format(study_info.bmi) }}
+                    {% if study_info.bmi < 18.5 %}
+                    <span style="color: #3498db; font-size: 12px;">(Underweight)</span>
+                    {% elif study_info.bmi < 25 %}
+                    <span style="color: #27ae60; font-size: 12px;">(Normal)</span>
+                    {% elif study_info.bmi < 30 %}
+                    <span style="color: #f39c12; font-size: 12px;">(Overweight)</span>
+                    {% else %}
+                    <span style="color: #e74c3c; font-size: 12px;">(Obese)</span>
+                    {% endif %}
+                </span>
+            </div>
+            {% endif %}
+        </div>
+        
+        <div class="info-section">
+            <h2>🏥 Study Information</h2>
+            <div class="info-row">
+                <span class="info-label">Study Date:</span>
+                <span class="info-value">{{ study_info.study_date_formatted or study_info.study_date or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Study Time:</span>
+                <span class="info-value">{{ study_info.study_time_formatted or study_info.study_time or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Note:</span>
+                <span class="info-value" style="color: #7f8c8d; font-size: 12px;">
+                    Acquisition times vary by series - see Series table below
+                </span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Study Description:</span>
+                <span class="info-value">{{ study_info.study_description or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Study ID:</span>
+                <span class="info-value">{{ study_info.study_id or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Accession Number:</span>
+                <span class="info-value">{{ study_info.accession_number or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Referring Physician:</span>
+                <span class="info-value">{{ study_info.referring_physician_name or 'N/A' }}</span>
+            </div>
+        </div>
+        
+        <div class="info-section">
+            <h2>🏭 Manufacturer Information</h2>
+            <div class="info-row">
+                <span class="info-label">Manufacturer:</span>
+                <span class="info-value">{{ study_info.manufacturer or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Model Name:</span>
+                <span class="info-value">{{ study_info.manufacturer_model_name or 'N/A' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Institution:</span>
+                <span class="info-value">{{ study_info.institution_name or 'N/A' }}</span>
+            </div>
+        </div>
+        
+        
+        <div class="info-section">
+            <h2>📋 Series ({{ series|length }})</h2>
+            {% if series %}
+            <div class="series-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Series #</th>
+                            <th>Description</th>
+                            <th>Modality</th>
+                            <th>Injection Time</th>
+                            <th>Acquisition Date/Time</th>
+                            <th>Injection→Scan Delay</th>
+                            <th>Manufacturer</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in series %}
+                        <tr>
+                            <td>{{ s.series_number or 'N/A' }}</td>
+                            <td>{{ s.series_description or 'N/A' }}</td>
+                            <td>
+                                {% if s.modality %}
+                                <span class="badge badge-modality">{{ s.modality }}</span>
+                                {% else %}
+                                N/A
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if s.injection_time_formatted %}
+                                    {{ s.injection_time_formatted }}
+                                    {% if s.injection_date_formatted %}
+                                        <br><small style="color: #7f8c8d;">{{ s.injection_date_formatted }}</small>
+                                    {% elif s.injection_date %}
+                                        <br><small style="color: #7f8c8d;">{{ s.injection_date }}</small>
+                                    {% endif %}
+                                {% elif s.injection_time %}
+                                    {{ s.injection_time }}
+                                {% else %}
+                                    <span style="color: #bdc3c7;">N/A</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if s.acquisition_date_formatted or s.acquisition_time_formatted %}
+                                    {% if s.acquisition_date_formatted %}
+                                        {{ s.acquisition_date_formatted }}
+                                    {% else %}
+                                        {{ s.acquisition_date or 'N/A' }}
+                                    {% endif %}
+                                    {% if s.acquisition_time_formatted %}
+                                        <br><strong>{{ s.acquisition_time_formatted }}</strong>
+                                        {% if s.acquisition_likely_next_day %}
+                                        <br><small style="color: #7f8c8d;">(likely next day)</small>
+                                        {% endif %}
+                                    {% else %}
+                                        <br><small>{{ s.acquisition_time or '' }}</small>
+                                    {% endif %}
+                                {% else %}
+                                    {{ s.series_date_formatted or s.series_date or 'N/A' }}
+                                    {% if s.series_time_formatted %}
+                                    <br><small>{{ s.series_time_formatted }}</small>
+                                    {% endif %}
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if s.injection_delay %}
+                                    <span style="color: #3498db; font-weight: 500;">{{ s.injection_delay }}</span>
+                                {% else %}
+                                    <span style="color: #bdc3c7;">N/A</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if s.manufacturer %}
+                                <span class="badge badge-manufacturer">{{ s.manufacturer }}</span>
+                                {% else %}
+                                N/A
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="expandable" onclick="toggleDetails('series-{{ loop.index }}')">Show Details</span>
+                            </td>
+                        </tr>
+                        <tr id="series-{{ loop.index }}" style="display: none;">
+                            <td colspan="8">
+                                <div style="padding: 15px; background: #f8f9fa; border-radius: 4px;">
+                                    <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #dee2e6;">
+                                        <strong style="color: #2c3e50; font-size: 14px;">Series Information</strong>
+                                    </div>
+                                    <strong>Series UID:</strong> {{ s.series_instance_uid }}<br>
+                                    <strong>File Path:</strong> {{ s.file_path or 'N/A' }}<br>
+                                    {% if s.body_part_examined %}
+                                    <strong>Body Part:</strong> {{ s.body_part_examined }}<br>
+                                    {% endif %}
+                                    {% if s.slice_thickness %}
+                                    <strong>Slice Thickness:</strong> {{ "%.2f"|format(s.slice_thickness) }} mm<br>
+                                    {% endif %}
+                                    {% if s.pixel_spacing %}
+                                    <strong>Pixel Spacing:</strong> {{ s.pixel_spacing }}<br>
+                                    {% endif %}
+                                    {% if s.image_type %}
+                                    <strong>Image Type:</strong> {{ s.image_type }}<br>
+                                    {% endif %}
+                                    {% if s.software_version %}
+                                    <strong>Software:</strong> {{ s.software_version }}<br>
+                                    {% endif %}
+                                    {% if s.manufacturer_model_name %}
+                                    <strong>Model:</strong> {{ s.manufacturer_model_name }}<br>
+                                    {% endif %}
+                                    
+                                    {% if s.radiopharmaceutical or s.injected_activity or s.decay_correction %}
+                                    <div style="margin-top: 15px; margin-bottom: 15px; padding-top: 15px; padding-bottom: 15px; border-top: 1px solid #dee2e6; border-bottom: 1px solid #dee2e6;">
+                                        <strong style="color: #2c3e50; font-size: 14px;">💊 Nuclear Medicine Information</strong>
+                                    </div>
+                                    {% if s.radiopharmaceutical %}
+                                    <strong>Radiopharmaceutical:</strong> {{ s.radiopharmaceutical }}<br>
+                                    {% endif %}
+                                    {% if s.injected_activity %}
+                                    <strong>Injected Activity:</strong> {{ "%.2f"|format(s.injected_activity) }} Bq
+                                    {% if s.injected_activity > 1e6 %}
+                                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.2f"|format(s.injected_activity / 1e6) }} MBq)</span>
+                                    {% endif %}
+                                    <br>
+                                    {% endif %}
+                                    {% if s.injection_time_formatted or s.injection_time %}
+                                    <strong>Injection Time:</strong> {{ s.injection_time_formatted or s.injection_time }}{% if s.injection_date_formatted %} ({{ s.injection_date_formatted }}){% endif %}<br>
+                                    {% endif %}
+                                    {% if s.half_life %}
+                                    <strong>Half Life:</strong> {{ "%.2f"|format(s.half_life) }} s
+                                    {% if s.half_life > 60 %}
+                                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.1f"|format(s.half_life / 60) }} min)</span>
+                                    {% endif %}
+                                    <br>
+                                    {% endif %}
+                                    {% if s.decay_correction %}
+                                    <strong>Decay Correction:</strong> {{ s.decay_correction }}<br>
+                                    {% endif %}
+                                    {% if s.radiopharmaceutical_volume %}
+                                    <strong>Radiopharmaceutical Volume:</strong> {{ "%.2f"|format(s.radiopharmaceutical_volume) }} ml<br>
+                                    {% endif %}
+                                    {% if s.radionuclide_total_dose and s.radionuclide_total_dose != s.injected_activity %}
+                                    <strong>Radionuclide Total Dose:</strong> {{ "%.2f"|format(s.radionuclide_total_dose) }} Bq
+                                    {% if s.radionuclide_total_dose > 1e6 %}
+                                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.2f"|format(s.radionuclide_total_dose / 1e6) }} MBq)</span>
+                                    {% endif %}
+                                    <br>
+                                    {% endif %}
+                                    {% if s.activity_at_scan %}
+                                    <strong>Activity at Scan Time:</strong> {{ "%.2f"|format(s.activity_at_scan) }} Bq
+                                    {% if s.activity_at_scan > 1e6 %}
+                                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.2f"|format(s.activity_at_scan / 1e6) }} MBq)</span>
+                                    {% endif %}
+                                    {% if s.decay_percent %}
+                                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.1f"|format(s.decay_percent) }}% decayed)</span>
+                                    {% endif %}
+                                    <br>
+                                    {% endif %}
+                                    {% if s.activity_per_kg %}
+                                    <strong>Activity per kg Body Weight:</strong> {{ "%.2f"|format(s.activity_per_kg) }} Bq/kg<br>
+                                    {% endif %}
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p style="color: #7f8c8d;">No series found in this study.</p>
+            {% endif %}
+        </div>
+    </div>
+    
+    <script>
+        function toggleDetails(id) {
+            const el = document.getElementById(id);
+            if (el.style.display === 'none') {
+                el.style.display = '';
+            } else {
+                el.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
+

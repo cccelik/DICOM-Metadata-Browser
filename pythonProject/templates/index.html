@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DICOM Metadata Browser</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        
+        .error {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c00;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        .studies-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .study-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+        
+        .study-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .study-card h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .study-info {
+            display: grid;
+            gap: 8px;
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+        }
+        
+        .info-label {
+            color: #7f8c8d;
+            font-weight: 500;
+        }
+        
+        .info-value {
+            color: #2c3e50;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .badge-modality {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .badge-manufacturer {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+        
+        .series-count {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #7f8c8d;
+        }
+        
+        .empty-state h2 {
+            margin-bottom: 10px;
+            color: #95a5a6;
+        }
+        
+        a {
+            text-decoration: none;
+            color: inherit;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1>📊 DICOM Metadata Browser</h1>
+                    <p class="subtitle">Database: {{ db_path }}</p>
+                </div>
+                <button id="upload-toggle-btn" onclick="toggleUploadZone()" 
+                        style="padding: 12px 24px; background: #27ae60; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: 500; transition: background 0.2s;"
+                        onmouseover="this.style.background='#229954'"
+                        onmouseout="this.style.background='#27ae60'">
+                    📤 Upload
+                </button>
+            </div>
+        </header>
+        
+        <!-- Upload Zone -->
+        <div id="upload-zone" style="display: none; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 30px; border: 2px dashed #3498db; text-align: center; cursor: pointer; transition: all 0.3s;"
+             ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" onclick="document.getElementById('file-input').click()">
+            <input type="file" id="file-input" accept=".zip,.7z" style="display: none;" onchange="handleFileSelect(event)">
+            <div id="upload-content">
+                <div style="font-size: 48px; margin-bottom: 10px;">📦</div>
+                <h3 style="margin: 10px 0; color: #2c3e50;">Drop ZIP or 7Z files here</h3>
+                <p style="color: #7f8c8d; margin: 5px 0;">or click to browse</p>
+                <p style="color: #95a5a6; font-size: 12px; margin-top: 10px;">Supports: .zip, .7z</p>
+            </div>
+            <div id="upload-progress" style="display: none;">
+                <div style="margin: 20px 0;">
+                    <div style="background: #ecf0f1; border-radius: 10px; height: 20px; overflow: hidden;">
+                        <div id="progress-bar" style="background: #3498db; height: 100%; width: 0%; transition: width 0.3s;"></div>
+                    </div>
+                    <p id="progress-text" style="margin-top: 10px; color: #7f8c8d;">Processing...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search Form -->
+        <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 30px;">
+            <form method="GET" action="/" style="display: flex; gap: 10px; align-items: center;">
+                <input type="hidden" name="db" value="{{ db_path }}">
+                <input 
+                    type="text" 
+                    name="search" 
+                    placeholder="Search by patient name, ID, modality, radiopharmaceutical, manufacturer..." 
+                    value="{{ search_term or '' }}"
+                    style="flex: 1; padding: 12px; border: 2px solid #ddd; border-radius: 6px; font-size: 16px;"
+                    autofocus
+                >
+                <button 
+                    type="submit" 
+                    style="padding: 12px 24px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: 500;"
+                >
+                    🔍 Search
+                </button>
+                {% if search_term %}
+                <a 
+                    href="/?db={{ db_path }}" 
+                    style="padding: 12px 20px; background: #95a5a6; color: white; border-radius: 6px; text-decoration: none; font-size: 16px;"
+                >
+                    Clear
+                </a>
+                {% endif %}
+            </form>
+            {% if search_term %}
+            <p style="margin-top: 10px; color: #7f8c8d; font-size: 14px;">
+                Searching for: <strong>{{ search_term }}</strong>
+                {% if studies %}
+                    <span style="color: #27ae60;">({{ studies|length }} result{% if studies|length != 1 %}s{% endif %} found)</span>
+                {% else %}
+                    <span style="color: #e74c3c;">(no results)</span>
+                {% endif %}
+            </p>
+            {% endif %}
+        </div>
+        
+        {% if deleted == '1' %}
+        <div style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+            <strong>✓ Success:</strong> Study deleted successfully ({{ deleted_count }} series removed).
+        </div>
+        {% endif %}
+        
+        {% if error %}
+        <div class="error">
+            <strong>Error:</strong> {{ error }}
+        </div>
+        {% endif %}
+        
+        {% if studies %}
+        <div class="studies-grid">
+            {% for study in studies %}
+            <a href="/study/{{ study.study_instance_uid }}?db={{ db_path }}">
+                <div class="study-card">
+                    <h3>
+                        {% if study.patient_name_display %}
+                            {{ study.patient_name_display }}
+                        {% elif study.patient_name %}
+                            {{ study.patient_name }}
+                        {% else %}
+                            Study {{ loop.index }}
+                        {% endif %}
+                    </h3>
+                    <div class="study-info">
+                        <div class="info-row">
+                            <span class="info-label">Patient ID:</span>
+                            <span class="info-value">{{ study.patient_id or 'N/A' }}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Study Date:</span>
+                            <span class="info-value">{{ study.study_date_formatted or study.study_date or 'N/A' }}</span>
+                        </div>
+                        {% if study.study_time_formatted %}
+                        <div class="info-row">
+                            <span class="info-label">Time:</span>
+                            <span class="info-value">{{ study.study_time_formatted }}</span>
+                        </div>
+                        {% endif %}
+                        {% if study.study_description %}
+                        <div class="info-row">
+                            <span class="info-label">Description:</span>
+                            <span class="info-value" style="font-size: 12px;">{{ study.study_description[:50] }}{% if study.study_description|length > 50 %}...{% endif %}</span>
+                        </div>
+                        {% endif %}
+                        <div class="info-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee;">
+                            {% if study.modality %}
+                            <span class="badge badge-modality">{{ study.modality }}</span>
+                            {% endif %}
+                            {% if study.manufacturer %}
+                            <span class="badge badge-manufacturer">{{ study.manufacturer }}</span>
+                            {% endif %}
+                            {% if study.radiopharmaceutical %}
+                            <span class="badge" style="background: #16a085; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px;">{{ study.radiopharmaceutical[:15] }}{% if study.radiopharmaceutical|length > 15 %}...{% endif %}</span>
+                            {% endif %}
+                            <span class="badge series-count">{{ study.series_count }} series</span>
+                        </div>
+                        {% if search_term and study.match_score %}
+                        <div style="margin-top: 8px; font-size: 11px; color: #7f8c8d;">
+                            Match: {{ "%.0f"|format(study.match_score * 100) }}%
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            {% if search_term %}
+            <h2>No results found</h2>
+            <p>No studies match "<strong>{{ search_term }}</strong>"</p>
+            <p style="margin-top: 15px;">
+                <a href="/?db={{ db_path }}" style="color: #3498db; text-decoration: underline;">Show all studies</a>
+            </p>
+            {% else %}
+            <h2>No studies found</h2>
+            <p>Process some DICOM files first using:<br><code>python3 process_dicom.py &lt;directory&gt;</code></p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        const uploadZone = document.getElementById('upload-zone');
+        const uploadContent = document.getElementById('upload-content');
+        const uploadProgress = document.getElementById('upload-progress');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const uploadToggleBtn = document.getElementById('upload-toggle-btn');
+
+        function toggleUploadZone() {
+            if (uploadZone.style.display === 'none' || uploadZone.style.display === '') {
+                uploadZone.style.display = 'block';
+                uploadToggleBtn.textContent = '✕ Close Upload';
+                uploadToggleBtn.style.background = '#e74c3c';
+                uploadToggleBtn.onmouseover = function() { this.style.background = '#c0392b'; };
+                uploadToggleBtn.onmouseout = function() { this.style.background = '#e74c3c'; };
+            } else {
+                uploadZone.style.display = 'none';
+                uploadToggleBtn.textContent = '📤 Upload';
+                uploadToggleBtn.style.background = '#27ae60';
+                uploadToggleBtn.onmouseover = function() { this.style.background = '#229954'; };
+                uploadToggleBtn.onmouseout = function() { this.style.background = '#27ae60'; };
+                // Reset upload state when closing
+                uploadContent.style.display = 'block';
+                uploadProgress.style.display = 'none';
+                progressBar.style.width = '0%';
+                progressBar.style.background = '#3498db';
+            }
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadZone.style.borderColor = '#2980b9';
+            uploadZone.style.background = '#f0f8ff';
+        }
+
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadZone.style.borderColor = '#3498db';
+            uploadZone.style.background = 'white';
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadZone.style.borderColor = '#3498db';
+            uploadZone.style.background = 'white';
+
+            const files = Array.from(e.dataTransfer.files);
+            files.forEach(file => {
+                if (file.name.endsWith('.zip') || file.name.endsWith('.7z')) {
+                    uploadFile(file);
+                } else {
+                    alert('Only ZIP and 7Z files are supported.');
+                }
+            });
+        }
+
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            files.forEach(file => {
+                if (file.name.endsWith('.zip') || file.name.endsWith('.7z')) {
+                    uploadFile(file);
+                } else {
+                    alert('Only ZIP and 7Z files are supported.');
+                }
+            });
+        }
+
+        function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('db', '{{ db_path }}');
+
+            uploadContent.style.display = 'none';
+            uploadProgress.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressText.textContent = `Uploading ${file.name}...`;
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    progressBar.style.width = '100%';
+                    progressText.textContent = `✓ ${data.message}`;
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    progressText.textContent = `✗ Error: ${data.message}`;
+                    progressBar.style.background = '#e74c3c';
+                    setTimeout(() => {
+                        uploadContent.style.display = 'block';
+                        uploadProgress.style.display = 'none';
+                        progressBar.style.background = '#3498db';
+                        progressBar.style.width = '0%';
+                    }, 3000);
+                }
+            })
+            .catch(error => {
+                progressText.textContent = `✗ Error: ${error.message}`;
+                progressBar.style.background = '#e74c3c';
+                setTimeout(() => {
+                    uploadContent.style.display = 'block';
+                    uploadProgress.style.display = 'none';
+                    progressBar.style.background = '#3498db';
+                    progressBar.style.width = '0%';
+                }, 3000);
+            });
+        }
+    </script>
+</body>
+</html>

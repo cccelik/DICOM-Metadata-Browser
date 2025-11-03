@@ -1,0 +1,4 @@
+pydicom>=2.3.0
+flask>=2.0.0
+py7zr>=0.20.0
+numpy>=1.20.0
