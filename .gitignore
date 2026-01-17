@@ -1,0 +1,13 @@
+*
+!.gitignore
+!DICOM-Metadata-Browser/
+!DICOM-Metadata-Browser/extract_metadata.py
+!DICOM-Metadata-Browser/process_dicom.py
+!DICOM-Metadata-Browser/store_metadata.py
+!DICOM-Metadata-Browser/webui.py
+!DICOM-Metadata-Browser/requirements.txt
+!DICOM-Metadata-Browser/README.md
+!DICOM-Metadata-Browser/TUMLogo.svg
+!DICOM-Metadata-Browser/translations.py
+!DICOM-Metadata-Browser/templates/
+!DICOM-Metadata-Browser/templates/**
