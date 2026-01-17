@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Study Details - DICOM Metadata Browser</title>
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
     <style>
         * {
             margin: 0;
@@ -49,13 +50,6 @@
             margin-bottom: 20px;
         }
         
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
         .info-section {
             background: white;
             padding: 25px;
@@ -72,28 +66,30 @@
             border-bottom: 2px solid #ecf0f1;
         }
         
-        .info-row {
-            display: grid;
-            grid-template-columns: 150px 1fr;
-            gap: 10px;
-            padding: 8px 0;
-            border-bottom: 1px solid #f0f0f0;
-        }
-        
-        .info-row:last-child {
-            border-bottom: none;
-        }
-        
-        .info-label {
-            color: #7f8c8d;
-            font-weight: 500;
-            font-size: 14px;
-        }
-        
         .info-value {
             color: #2c3e50;
             font-size: 14px;
             word-break: break-word;
+        }
+
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .info-table th,
+        .info-table td {
+            text-align: left;
+            padding: 8px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: top;
+        }
+
+        .info-table th {
+            width: 200px;
+            color: #7f8c8d;
+            font-weight: 500;
         }
         
         .badge {
@@ -120,15 +116,18 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            overflow: hidden;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
         }
         
         .series-table table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 1100px;
         }
         
-        .series-table th {
+        .series-table > table th {
             background: #34495e;
             color: white;
             padding: 12px;
@@ -155,42 +154,734 @@
             cursor: pointer;
             color: #3498db;
         }
-        
+
         .expandable:hover {
             text-decoration: underline;
         }
-        
-        .json-view {
-            background: #2c3e50;
-            color: #ecf0f1;
-            padding: 15px;
+
+        .lang-toggle {
+            padding: 6px 12px;
+            text-decoration: none;
             border-radius: 4px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            overflow-x: auto;
-            margin-top: 10px;
-            white-space: pre-wrap;
-            word-break: break-all;
+            font-size: 14px;
+            color: #7f8c8d;
+            font-weight: 400;
         }
+
+        .lang-toggle.active {
+            background: #3498db;
+            color: white;
+            font-weight: 500;
+        }
+
+        .top-bar {
+            width: 100%;
+            background: #fff;
+            border-bottom: 4px solid #4e85e9;
+            color: #0c2e49;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .top-bar-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .top-bar-copy {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.2;
+        }
+
+        .top-bar-copy span,
+        .top-bar-copy strong {
+            font-size: 16px;
+            font-weight: 400;
+        }
+
+        .top-bar-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            flex: 1;
+            text-align: center;
+        }
+
+        .top-bar-center .title-main {
+            font-size: 20px;
+            font-weight: 600;
+            color: #0c2e49;
+        }
+
+        .top-bar-center .title-sub {
+            font-size: 14px;
+            font-weight: 400;
+            color: #5c6b84;
+        }
+
+        .top-bar-right {
+            font-size: 13px;
+            text-align: right;
+            line-height: 1.3;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 4px;
+        }
+
+        .top-bar-right img {
+            height: 100px;
+        }
+
+        .hamburger-wrapper {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .hamburger-button {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.2);
+            background: transparent;
+            cursor: pointer;
+            display: inline-flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 6px;
+            padding: 0;
+        }
+
+        .hamburger-button span {
+            display: block;
+            width: 20px;
+            height: 2px;
+            background: #0c2e49;
+            border-radius: 4px;
+        }
+
+        .hamburger-menu {
+            position: absolute;
+            top: 48px;
+            left: 0;
+            background: white;
+            color: #0c2e49;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+            overflow: hidden;
+            min-width: 180px;
+            transform-origin: top left;
+            transform: scale(0.95);
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.2s ease;
+            z-index: 10;
+        }
+
+        .hamburger-menu.open {
+            transform: scale(1);
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .hamburger-menu a,
+        .hamburger-menu button {
+            display: block;
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            color: inherit;
+            font-size: 14px;
+            text-decoration: none;
+            background: transparent;
+            border: none;
+            text-align: left;
+            width: 100%;
+            cursor: pointer;
+        }
+
+        .hamburger-lang {
+            display: flex;
+            gap: 6px;
+            padding: 8px 16px;
+            justify-content: space-between;
+        }
+
+        .theme-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .theme-toggle i {
+            font-size: 18px;
+            line-height: 1;
+        }
+        
+        .detail-panel {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .detail-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .detail-table th,
+        .detail-table td {
+            text-align: left;
+            padding: 6px 8px;
+            border-bottom: 1px solid #e1e6ee;
+            vertical-align: top;
+            background: #f8f9fa;
+        }
+
+        .detail-table th {
+            width: 220px;
+            color: #2c3e50;
+            font-weight: 600;
+            background: #eef2f7;
+        }
+
+        .detail-panel-section {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .detail-panel-divider {
+            margin-top: 15px;
+            margin-bottom: 15px;
+            padding-top: 15px;
+            padding-bottom: 15px;
+            border-top: 1px solid #dee2e6;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .detail-panel-title {
+            color: #2c3e50;
+            font-size: 14px;
+        }
+
+        body.dark {
+            background: #0f141b;
+            color: #e6edf3;
+        }
+
+        body.dark .top-bar {
+            background: #121a24;
+            border-bottom-color: #2a3b52;
+            color: #e6edf3;
+        }
+
+        body.dark .top-bar-center .title-main,
+        body.dark .top-bar-copy span,
+        body.dark .top-bar-copy strong {
+            color: #e6edf3;
+        }
+
+        body.dark .top-bar-center .title-sub {
+            color: #9aa7b5;
+        }
+
+        body.dark .top-bar-right img {
+            filter: brightness(1.6) contrast(1.1);
+        }
+
+        body.dark .hamburger-button {
+            border-color: #2a3b52;
+        }
+
+        body.dark .hamburger-button span {
+            background: #e6edf3;
+        }
+
+        body.dark .hamburger-menu {
+            background: #18212d;
+            color: #e6edf3;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        }
+
+        body.dark .hamburger-menu a,
+        body.dark .hamburger-menu button {
+            border-bottom: 1px solid #243244;
+        }
+
+        body.dark .lang-toggle {
+            color: #9aa7b5;
+        }
+
+        body.dark .lang-toggle.active {
+            background: #2a62b8;
+            color: #fff;
+        }
+
+        body.dark .header-section,
+        body.dark .info-section,
+        body.dark .series-table {
+            background: #141c26;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.35);
+        }
+
+        body.dark .info-table th,
+        body.dark .info-table td {
+            border-bottom-color: #243244;
+        }
+
+        body.dark .info-value,
+        body.dark h1,
+        body.dark h2 {
+            color: #e6edf3;
+        }
+
+        body.dark .series-table th {
+            background: #1e2936;
+            color: #e6edf3;
+        }
+
+        body.dark .series-table td {
+            border-bottom-color: #243244;
+        }
+
+        body.dark .series-table tr:hover {
+            background: #18212d;
+        }
+
+        body.dark .badge-modality {
+            background: #1f3248;
+            color: #90c2ff;
+        }
+
+        body.dark .badge-manufacturer {
+            background: #30203b;
+            color: #d1a4ff;
+        }
+
+        body.dark .detail-panel {
+            background: #101922;
+        }
+
+        body.dark .detail-panel-section {
+            border-bottom-color: #243244;
+        }
+
+        body.dark .detail-table th,
+        body.dark .detail-table td {
+            border-bottom-color: #243244;
+            background: #101922;
+        }
+
+        body.dark .detail-table th {
+            color: #e6edf3;
+            background: #1b2532;
+        }
+
+        body.dark .detail-panel-divider {
+            border-top-color: #243244;
+            border-bottom-color: #243244;
+        }
+
+        body.dark .detail-panel-title {
+            color: #e6edf3;
+        }
+
+        body.dark .detail-panel strong {
+            color: #e6edf3;
+        }
+
+        .databank-item {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid #d7dde4;
+            background: #f8f9fb;
+            font-size: 12px;
+            color: #2c3e50;
+            transition: all 0.2s ease;
+        }
+
+        .databank-item:hover {
+            border-color: #4e85e9;
+            color: #1f4b99;
+            background: #eef4ff;
+        }
+
+        .databank-item.active {
+            background: #0c2e49;
+            border-color: #0c2e49;
+            color: #fff;
+        }
+
+        .databank-create {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px dashed #4e85e9;
+            background: #f5f9ff;
+            color: #1f4b99;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .databank-create:hover {
+            background: #e6f0ff;
+            border-color: #2f6fe0;
+        }
+
+        .hamburger-section-title {
+            padding: 10px 16px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #7f8c8d;
+            background: #f5f7fa;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .hamburger-databanks {
+            padding: 10px 12px 14px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        body.dark .databank-item {
+            background: #0f141b;
+            border-color: #2a3b52;
+            color: #e6edf3;
+        }
+
+        body.dark .databank-item:hover {
+            border-color: #4e85e9;
+            color: #cfe0ff;
+            background: #18263a;
+        }
+
+        body.dark .databank-item.active {
+            background: #4e85e9;
+            border-color: #4e85e9;
+            color: #0b1320;
+        }
+
+        body.dark .databank-create {
+            background: #152235;
+            border-color: #4e85e9;
+            color: #cfe0ff;
+        }
+
+        body.dark .databank-create:hover {
+            background: #1b2a40;
+        }
+
+        body.dark .hamburger-section-title {
+            color: #9aa7b5;
+            background: #121a24;
+            border-bottom-color: #243244;
+        }
+
+        .action-buttons {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .export-button {
+            padding: 8px 16px;
+            background: #1abc9c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.2s ease;
+        }
+
+        .export-button:hover {
+            background: #169f82;
+        }
+
+        body.dark .export-button {
+            background: #1f8f7a;
+        }
+
+        body.dark .export-button:hover {
+            background: #177564;
+        }
+
+        .export-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 20, 27, 0.55);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            z-index: 50;
+        }
+
+        .export-modal.open {
+            display: flex;
+        }
+
+        .export-modal-content {
+            background: #fff;
+            border-radius: 12px;
+            width: min(960px, 95vw);
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 18px 45px rgba(0, 0, 0, 0.25);
+        }
+
+        .export-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 22px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .export-modal-header h3 {
+            font-size: 18px;
+            color: #2c3e50;
+        }
+
+        .export-modal-close {
+            border: none;
+            background: transparent;
+            font-size: 22px;
+            cursor: pointer;
+            color: #7f8c8d;
+        }
+
+        .export-modal-body {
+            padding: 18px 22px;
+            overflow-y: auto;
+        }
+
+        .export-modal-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .export-action-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .export-small-button {
+            border: 1px solid #d7dde4;
+            background: #f8f9fb;
+            color: #2c3e50;
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .export-small-button:hover {
+            border-color: #4e85e9;
+            color: #1f4b99;
+            background: #eef4ff;
+        }
+
+        .export-sections {
+            display: grid;
+            gap: 14px;
+        }
+
+        .export-section {
+            border: 1px solid #e6ebf2;
+            border-radius: 10px;
+            padding: 14px;
+            background: #fdfdff;
+        }
+
+        .export-section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        .export-field-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 8px 14px;
+        }
+
+        .export-field {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #2c3e50;
+        }
+
+        .export-modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 16px 22px;
+            border-top: 1px solid #ecf0f1;
+            background: #f8f9fb;
+        }
+
+        .export-primary {
+            background: #4e85e9;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 18px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .export-secondary {
+            background: transparent;
+            color: #2c3e50;
+            border: 1px solid #d7dde4;
+            border-radius: 6px;
+            padding: 10px 16px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        body.dark .export-modal-content {
+            background: #141c26;
+            color: #e6edf3;
+            border: 1px solid #243244;
+        }
+
+        body.dark .export-modal-header {
+            border-bottom-color: #243244;
+        }
+
+        body.dark .export-modal-header h3 {
+            color: #e6edf3;
+        }
+
+        body.dark .export-modal-close {
+            color: #9aa7b5;
+        }
+
+        body.dark .export-section {
+            background: #101922;
+            border-color: #243244;
+        }
+
+        body.dark .export-section-header,
+        body.dark .export-field {
+            color: #e6edf3;
+        }
+
+        body.dark .export-small-button {
+            background: #18263a;
+            border-color: #2a3b52;
+            color: #cfe0ff;
+        }
+
+        body.dark .export-small-button:hover {
+            background: #1c2d43;
+            border-color: #4e85e9;
+            color: #fff;
+        }
+
+        body.dark .export-modal-footer {
+            border-top-color: #243244;
+            background: #0f141b;
+        }
+
+        body.dark .export-secondary {
+            border-color: #2a3b52;
+            color: #e6edf3;
+        }
+
     </style>
 </head>
 <body>
+    <div class="top-bar">
+        <div class="top-bar-left">
+            <div class="hamburger-wrapper">
+                <button id="top-study-hamburger" class="hamburger-button" aria-label="Open menu" aria-expanded="false" aria-controls="top-study-menu">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+                <div id="top-study-menu" class="hamburger-menu">
+                    <a href="/dashboard?db={{ db_name }}">{{ t.dashboard }}</a>
+                    <button
+                        type="button"
+                        id="theme-toggle"
+                        class="theme-toggle"
+                        data-dark="{{ t.dark_mode }}"
+                        data-light="{{ t.light_mode }}"
+                        data-dark-icon="ph-moon"
+                        data-light-icon="ph-sun"
+                        aria-label="{{ t.dark_mode }}"
+                        title="{{ t.dark_mode }}"
+                    ><i class="ph ph-moon" aria-hidden="true"></i></button>
+                    <div class="hamburger-lang">
+                        <a href="/?db={{ db_name }}&lang=en" class="lang-toggle {% if lang == 'en' %}active{% endif %}">EN</a>
+                        <a href="/?db={{ db_name }}&lang=de" class="lang-toggle {% if lang == 'de' %}active{% endif %}">DE</a>
+                    </div>
+                    <div class="hamburger-section-title">Databanks</div>
+                    <div class="hamburger-databanks">
+                        {% if databanks %}
+                            {% for bank in databanks %}
+                            <a href="/study/{{ study_info.study_instance_uid }}?db={{ bank }}&lang={{ lang }}" class="databank-item {% if bank == db_name %}active{% endif %}">{{ bank }}</a>
+                            {% endfor %}
+                        {% else %}
+                            <span class="subtitle">No databanks found in Databanks/</span>
+                        {% endif %}
+                        <button type="button" class="databank-create" onclick="createDatabank();">Create databank</button>
+                    </div>
+                </div>
+            </div>
+            <div class="top-bar-copy">
+                <span>{{ t.top_bar_primary }}</span>
+                <strong>{{ t.top_bar_secondary }}</strong>
+            </div>
+        </div>
+        <div class="top-bar-center">
+            <span class="title-main">DICOM Metadata Browser</span>
+            <span class="title-sub">&nbsp;</span>
+        </div>
+        <div class="top-bar-right">
+            <img src="{{ url_for('tum_logo') }}" alt="TUM Logo">
+        </div>
+    </div>
     <div class="container">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <a href="/?db={{ db_path }}&lang={{ lang }}" class="back-link">← {{ t.back_to_studies }}</a>
-            <div style="display: flex; gap: 10px; align-items: center;">
-                <!-- Language Switcher -->
-                <div style="display: flex; gap: 5px; background: #ecf0f1; padding: 4px; border-radius: 6px;">
-                    <a href="/study/{{ study_info.study_instance_uid }}?db={{ db_path }}&lang=en" 
-                       style="padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; {% if lang == 'en' %}background: #3498db; color: white; font-weight: 500;{% else %}color: #7f8c8d;{% endif %}">
-                        EN
-                    </a>
-                    <a href="/study/{{ study_info.study_instance_uid }}?db={{ db_path }}&lang=de" 
-                       style="padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; {% if lang == 'de' %}background: #3498db; color: white; font-weight: 500;{% else %}color: #7f8c8d;{% endif %}">
-                        DE
-                    </a>
-                </div>
-                <form method="POST" action="/study/{{ study_info.study_instance_uid }}/delete?db={{ db_path }}" 
+            <a href="/?db={{ db_name }}&lang={{ lang }}" class="back-link">← {{ t.back_to_studies }}</a>
+            <div class="action-buttons">
+                <button type="button" id="export-csv-button" class="export-button">
+                    {{ t.export_csv }}
+                </button>
+                <form method="POST" action="/study/{{ study_info.study_instance_uid }}/delete?db={{ db_name }}" 
                       style="margin: 0;" 
                       onsubmit="return confirm('{{ t.delete_confirm }}');">
                     <button type="submit" 
@@ -213,120 +904,158 @@
                     Study Details
                 {% endif %}
             </h1>
-            <div class="info-grid">
-                <div>
-                    <strong>{{ t.study_uid }}:</strong><br>
-                    <small style="color: #7f8c8d; word-break: break-all;">{{ study_info.study_instance_uid }}</small>
-                </div>
-                <div>
-                    <strong>{{ t.patient_id }}:</strong><br>
-                    {{ study_info.patient_id or 'N/A' }}
-                </div>
-                <div>
-                    <strong>{{ t.study_date }}:</strong><br>
-                    {{ study_info.study_date_formatted or study_info.study_date or 'N/A' }}
-                </div>
-            </div>
+            <table class="info-table">
+                <tr>
+                    <th>{{ t.study_uid }}</th>
+                    <td><small style="color: #7f8c8d; word-break: break-all;">{{ study_info.study_instance_uid }}</small></td>
+                </tr>
+                <tr>
+                    <th>{{ t.patient_id }}</th>
+                    <td>{{ study_info.patient_id or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.study_date }}</th>
+                    <td>{{ study_info.study_date_formatted or study_info.study_date or 'N/A' }}</td>
+                </tr>
+            </table>
         </div>
         
         <div class="info-section">
             <h2>{{ t.patient_information }}</h2>
-            <div class="info-row">
-                <span class="info-label">{{ t.patient_name }}:</span>
-                <span class="info-value">{{ study_info.patient_name or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.patient_id }}:</span>
-                <span class="info-value">{{ study_info.patient_id or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.patient_birth_date }}:</span>
-                <span class="info-value">{{ study_info.patient_birth_date_formatted or study_info.patient_birth_date or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.patient_sex }}:</span>
-                <span class="info-value">{{ study_info.patient_sex or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.patient_age }}:</span>
-                <span class="info-value">{{ study_info.patient_age or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.patient_weight }}:</span>
-                <span class="info-value">{% if study_info.patient_weight %}{{ "%.2f"|format(study_info.patient_weight) }} kg{% else %}N/A{% endif %}</span>
-            </div>
-            {% if study_info.patient_size %}
-            <div class="info-row">
-                <span class="info-label">{{ t.patient_height }}:</span>
-                <span class="info-value">
-                    {{ "%.2f"|format(study_info.patient_size) }} m
-                    {% if study_info.height_cm %}
-                    <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(study_info.height_cm) }} cm)</span>
-                    {% endif %}
-                </span>
-            </div>
-            {% endif %}
-            {% if study_info.bmi %}
-            <div class="info-row">
-                <span class="info-label">{{ t.bmi }}:</span>
-                <span class="info-value">
-                    {{ "%.1f"|format(study_info.bmi) }}
-                    {% if study_info.bmi < 18.5 %}
-                    <span style="color: #3498db; font-size: 12px;">{% if lang == 'de' %}(Untergewicht){% else %}(Underweight){% endif %}</span>
-                    {% elif study_info.bmi < 25 %}
-                    <span style="color: #27ae60; font-size: 12px;">{% if lang == 'de' %}(Normal){% else %}(Normal){% endif %}</span>
-                    {% elif study_info.bmi < 30 %}
-                    <span style="color: #f39c12; font-size: 12px;">{% if lang == 'de' %}(Übergewicht){% else %}(Overweight){% endif %}</span>
-                    {% else %}
-                    <span style="color: #e74c3c; font-size: 12px;">{% if lang == 'de' %}(Adipös){% else %}(Obese){% endif %}</span>
-                    {% endif %}
-                </span>
-            </div>
-            {% endif %}
+            <table class="info-table">
+                <tr>
+                    <th>{{ t.patient_name }}</th>
+                    <td class="info-value">{{ study_info.patient_name or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.patient_id }}</th>
+                    <td class="info-value">{{ study_info.patient_id or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.patient_birth_date }}</th>
+                    <td class="info-value">{{ study_info.patient_birth_date_formatted or study_info.patient_birth_date or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.patient_sex }}</th>
+                    <td class="info-value">{{ study_info.patient_sex or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.patient_age }}</th>
+                    <td class="info-value">{{ study_info.patient_age or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.patient_weight }}</th>
+                    <td class="info-value">{% if study_info.patient_weight %}{{ "%.2f"|format(study_info.patient_weight) }} kg{% else %}N/A{% endif %}</td>
+                </tr>
+                {% if study_info.patient_size %}
+                <tr>
+                    <th>{{ t.patient_height }}</th>
+                    <td class="info-value">
+                        {{ "%.2f"|format(study_info.patient_size) }} m
+                        {% if study_info.height_cm %}
+                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(study_info.height_cm) }} cm)</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endif %}
+                {% if study_info.bmi %}
+                <tr>
+                    <th>{{ t.bmi }}</th>
+                    <td class="info-value">
+                        {{ "%.1f"|format(study_info.bmi) }}
+                        {% if study_info.bmi < 18.5 %}
+                        <span style="color: #3498db; font-size: 12px;">{% if lang == 'de' %}(Untergewicht){% else %}(Underweight){% endif %}</span>
+                        {% elif study_info.bmi < 25 %}
+                        <span style="color: #27ae60; font-size: 12px;">{% if lang == 'de' %}(Normal){% else %}(Normal){% endif %}</span>
+                        {% elif study_info.bmi < 30 %}
+                        <span style="color: #f39c12; font-size: 12px;">{% if lang == 'de' %}(Übergewicht){% else %}(Overweight){% endif %}</span>
+                        {% else %}
+                        <span style="color: #e74c3c; font-size: 12px;">{% if lang == 'de' %}(Adipös){% else %}(Obese){% endif %}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endif %}
+            </table>
         </div>
         
         <div class="info-section">
             <h2>{{ t.study_information }}</h2>
-            <div class="info-row">
-                <span class="info-label">{{ t.study_date }}:</span>
-                <span class="info-value">{{ study_info.study_date_formatted or study_info.study_date or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.study_time }}:</span>
-                <span class="info-value">{{ study_info.study_time_formatted or study_info.study_time or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.study_description }}:</span>
-                <span class="info-value">{{ study_info.study_description or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.study_id }}:</span>
-                <span class="info-value">{{ study_info.study_id or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.accession_number }}:</span>
-                <span class="info-value">{{ study_info.accession_number or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.referring_physician }}:</span>
-                <span class="info-value">{{ study_info.referring_physician_name or 'N/A' }}</span>
-            </div>
+            <table class="info-table">
+                <tr>
+                    <th>{{ t.study_date }}</th>
+                    <td class="info-value">{{ study_info.study_date_formatted or study_info.study_date or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.study_time }}</th>
+                    <td class="info-value">{{ study_info.study_time_formatted or study_info.study_time or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.study_description }}</th>
+                    <td class="info-value">{{ study_info.study_description or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.study_id }}</th>
+                    <td class="info-value">{{ study_info.study_id or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.accession_number }}</th>
+                    <td class="info-value">{{ study_info.accession_number or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.referring_physician }}</th>
+                    <td class="info-value">{{ study_info.referring_physician_name or 'N/A' }}</td>
+                </tr>
+            </table>
         </div>
+
+        {% if study_info.ctp_collection or study_info.ctp_subject_id or study_info.ctp_private_flag_raw or study_info.ctp_private_flag_int %}
+        <div class="info-section">
+            <h2>{{ t.ctp_private_metadata }}</h2>
+            <table class="info-table">
+                {% if study_info.ctp_collection %}
+                <tr>
+                    <th>{{ t.ctp_collection }}</th>
+                    <td class="info-value">{{ study_info.ctp_collection }}</td>
+                </tr>
+                {% endif %}
+                {% if study_info.ctp_subject_id %}
+                <tr>
+                    <th>{{ t.ctp_subject_id }}</th>
+                    <td class="info-value">{{ study_info.ctp_subject_id }}</td>
+                </tr>
+                {% endif %}
+                {% if study_info.ctp_private_flag_raw %}
+                <tr>
+                    <th>{{ t.ctp_private_flag_raw }}</th>
+                    <td class="info-value">{{ study_info.ctp_private_flag_raw }}</td>
+                </tr>
+                {% endif %}
+                {% if study_info.ctp_private_flag_int is not none %}
+                <tr>
+                    <th>{{ t.ctp_private_flag_int }}</th>
+                    <td class="info-value">{{ study_info.ctp_private_flag_int }}</td>
+                </tr>
+                {% endif %}
+            </table>
+        </div>
+        {% endif %}
         
         <div class="info-section">
             <h2>{{ t.manufacturer_information }}</h2>
-            <div class="info-row">
-                <span class="info-label">{{ t.manufacturer }}:</span>
-                <span class="info-value">{{ study_info.manufacturer or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.model }}:</span>
-                <span class="info-value">{{ study_info.manufacturer_model_name or 'N/A' }}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">{{ t.institution }}:</span>
-                <span class="info-value">{{ study_info.institution_name or 'N/A' }}</span>
-            </div>
+            <table class="info-table">
+                <tr>
+                    <th>{{ t.manufacturer }}</th>
+                    <td class="info-value">{{ study_info.manufacturer or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.model }}</th>
+                    <td class="info-value">{{ study_info.manufacturer_model_name or 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>{{ t.institution }}</th>
+                    <td class="info-value">{{ study_info.institution_name or 'N/A' }}</td>
+                </tr>
+            </table>
         </div>
         
         
@@ -410,87 +1139,334 @@
                                 {% endif %}
                             </td>
                             <td>
-                                <span class="expandable" onclick="toggleDetails('series-{{ loop.index }}')">{{ t.show_details }}</span>
+                                <span
+                                    class="expandable"
+                                    data-show="{{ t.show_details }}"
+                                    data-hide="{{ t.hide_details }}"
+                                    onclick="toggleDetails('series-{{ loop.index }}', this)"
+                                >{{ t.show_details }}</span>
                             </td>
                         </tr>
                         <tr id="series-{{ loop.index }}" style="display: none;">
                             <td colspan="8">
-                                <div style="padding: 15px; background: #f8f9fa; border-radius: 4px;">
-                                    <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #dee2e6;">
-                                        <strong style="color: #2c3e50; font-size: 14px;">{{ t.series_information }}</strong>
+                                <div class="detail-panel">
+                                    <div class="detail-panel-section">
+                                        <strong class="detail-panel-title">{{ t.series_information }}</strong>
                                     </div>
-                                    <strong>{{ t.series_uid }}:</strong> {{ s.series_instance_uid }}<br>
-                                    <strong>{{ t.file_path }}:</strong> {{ s.file_path or 'N/A' }}<br>
-                                    {% if s.body_part_examined %}
-                                    <strong>{{ t.body_part }}:</strong> {{ s.body_part_examined }}<br>
+                                    <table class="detail-table">
+                                        <tr>
+                                            <th>{{ t.series_uid }}</th>
+                                            <td>{{ s.series_instance_uid }}</td>
+                                        </tr>
+                                        <tr>
+                                            <th>{{ t.file_path }}</th>
+                                            <td>{{ s.file_path or 'N/A' }}</td>
+                                        </tr>
+                                        {% if s.body_part_examined %}
+                                        <tr>
+                                            <th>{{ t.body_part }}</th>
+                                            <td>{{ s.body_part_examined }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.protocol_name %}
+                                        <tr>
+                                            <th>{{ t.protocol_name or 'Protocol Name' }}</th>
+                                            <td>{{ s.protocol_name }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.slice_thickness %}
+                                        <tr>
+                                            <th>{{ t.slice_thickness }}</th>
+                                            <td>{{ "%.2f"|format(s.slice_thickness) }} mm</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.pixel_spacing %}
+                                        <tr>
+                                            <th>{{ t.pixel_spacing }}</th>
+                                            <td>{{ s.pixel_spacing }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.image_type %}
+                                        <tr>
+                                            <th>{{ t.image_type }}</th>
+                                            <td>{{ s.image_type }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.software_version %}
+                                        <tr>
+                                            <th>{{ t.software_version }}</th>
+                                            <td>{{ s.software_version }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.manufacturer_model_name %}
+                                        <tr>
+                                            <th>{{ t.model }}</th>
+                                            <td>{{ s.manufacturer_model_name }}</td>
+                                        </tr>
+                                        {% endif %}
+                                    </table>
+
+                                    {% set has_acq = s.patient_position or s.scanning_sequence or s.sequence_variant or s.scan_options or s.acquisition_type or s.kvp or s.exposure_time or s.exposure or s.tube_current or s.spiral_pitch_factor or s.ctdivol or s.dlp or s.frame_time %}
+                                    {% if has_acq %}
+                                    <div class="detail-panel-divider">
+                                        <strong class="detail-panel-title">{{ t.acquisition_information or 'Acquisition Information' }}</strong>
+                                    </div>
+                                    <table class="detail-table">
+                                        {% if s.patient_position %}
+                                        <tr>
+                                            <th>{{ t.patient_position or 'Patient Position' }}</th>
+                                            <td>{{ s.patient_position }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.scanning_sequence %}
+                                        <tr>
+                                            <th>{{ t.scanning_sequence or 'Scanning Sequence' }}</th>
+                                            <td>{{ s.scanning_sequence }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.sequence_variant %}
+                                        <tr>
+                                            <th>{{ t.sequence_variant or 'Sequence Variant' }}</th>
+                                            <td>{{ s.sequence_variant }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.scan_options %}
+                                        <tr>
+                                            <th>{{ t.scan_options or 'Scan Options' }}</th>
+                                            <td>{{ s.scan_options }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.acquisition_type %}
+                                        <tr>
+                                            <th>{{ t.acquisition_type or 'Acquisition Type' }}</th>
+                                            <td>{{ s.acquisition_type }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.kvp %}
+                                        <tr>
+                                            <th>{{ t.kvp or 'KVP' }}</th>
+                                            <td>{{ "%.1f"|format(s.kvp) }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.exposure_time %}
+                                        <tr>
+                                            <th>{{ t.exposure_time or 'Exposure Time' }}</th>
+                                            <td>{{ "%.2f"|format(s.exposure_time) }} ms</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.exposure %}
+                                        <tr>
+                                            <th>{{ t.exposure or 'Exposure' }}</th>
+                                            <td>{{ "%.2f"|format(s.exposure) }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.tube_current %}
+                                        <tr>
+                                            <th>{{ t.tube_current or 'Tube Current' }}</th>
+                                            <td>{{ "%.2f"|format(s.tube_current) }} mA</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.spiral_pitch_factor %}
+                                        <tr>
+                                            <th>{{ t.spiral_pitch_factor or 'Spiral Pitch Factor' }}</th>
+                                            <td>{{ "%.3f"|format(s.spiral_pitch_factor) }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.ctdivol %}
+                                        <tr>
+                                            <th>{{ t.ctdivol or 'CTDIvol' }}</th>
+                                            <td>{{ "%.2f"|format(s.ctdivol) }} mGy</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.dlp %}
+                                        <tr>
+                                            <th>{{ t.dlp or 'DLP' }}</th>
+                                            <td>{{ "%.2f"|format(s.dlp) }} mGy·cm</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.frame_time %}
+                                        <tr>
+                                            <th>{{ t.frame_time or 'Frame Time' }}</th>
+                                            <td>{{ "%.2f"|format(s.frame_time) }} ms</td>
+                                        </tr>
+                                        {% endif %}
+                                    </table>
                                     {% endif %}
-                                    {% if s.slice_thickness %}
-                                    <strong>{{ t.slice_thickness }}:</strong> {{ "%.2f"|format(s.slice_thickness) }} mm<br>
+
+                                    {% set has_recon = s.reconstruction_diameter or s.reconstruction_algorithm or s.convolution_kernel or s.filter_type %}
+                                    {% if has_recon %}
+                                    <div class="detail-panel-divider">
+                                        <strong class="detail-panel-title">{{ t.reconstruction_information or 'Reconstruction Information' }}</strong>
+                                    </div>
+                                    <table class="detail-table">
+                                        {% if s.reconstruction_diameter %}
+                                        <tr>
+                                            <th>{{ t.reconstruction_diameter or 'Reconstruction Diameter' }}</th>
+                                            <td>{{ "%.2f"|format(s.reconstruction_diameter) }} mm</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.reconstruction_algorithm %}
+                                        <tr>
+                                            <th>{{ t.reconstruction_algorithm or 'Reconstruction Algorithm' }}</th>
+                                            <td>{{ s.reconstruction_algorithm }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.convolution_kernel %}
+                                        <tr>
+                                            <th>{{ t.convolution_kernel or 'Convolution Kernel' }}</th>
+                                            <td>{{ s.convolution_kernel }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.filter_type %}
+                                        <tr>
+                                            <th>{{ t.filter_type or 'Filter Type' }}</th>
+                                            <td>{{ s.filter_type }}</td>
+                                        </tr>
+                                        {% endif %}
+                                    </table>
                                     {% endif %}
-                                    {% if s.pixel_spacing %}
-                                    <strong>{{ t.pixel_spacing }}:</strong> {{ s.pixel_spacing }}<br>
-                                    {% endif %}
-                                    {% if s.image_type %}
-                                    <strong>{{ t.image_type }}:</strong> {{ s.image_type }}<br>
-                                    {% endif %}
-                                    {% if s.software_version %}
-                                    <strong>{{ t.software_version }}:</strong> {{ s.software_version }}<br>
-                                    {% endif %}
-                                    {% if s.manufacturer_model_name %}
-                                    <strong>{{ t.model }}:</strong> {{ s.manufacturer_model_name }}<br>
+
+                                    {% set has_image = s.image_orientation_patient or s.slice_location or s.number_of_frames or s.number_of_slices %}
+                                    {% if has_image %}
+                                    <div class="detail-panel-divider">
+                                        <strong class="detail-panel-title">{{ t.image_information or 'Image Information' }}</strong>
+                                    </div>
+                                    <table class="detail-table">
+                                        {% if s.image_orientation_patient %}
+                                        <tr>
+                                            <th>{{ t.image_orientation_patient or 'Image Orientation (Patient)' }}</th>
+                                            <td>{{ s.image_orientation_patient }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.slice_location %}
+                                        <tr>
+                                            <th>{{ t.slice_location or 'Slice Location' }}</th>
+                                            <td>{{ "%.2f"|format(s.slice_location) }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.number_of_slices %}
+                                        <tr>
+                                            <th>{{ t.number_of_slices or 'Images in Acquisition' }}</th>
+                                            <td>{{ s.number_of_slices }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.number_of_frames %}
+                                        <tr>
+                                            <th>{{ t.number_of_frames or 'Number of Frames' }}</th>
+                                            <td>{{ s.number_of_frames }}</td>
+                                        </tr>
+                                        {% endif %}
+                                    </table>
                                     {% endif %}
                                     
                                     {% if s.radiopharmaceutical or s.injected_activity or s.decay_correction %}
-                                    <div style="margin-top: 15px; margin-bottom: 15px; padding-top: 15px; padding-bottom: 15px; border-top: 1px solid #dee2e6; border-bottom: 1px solid #dee2e6;">
-                                        <strong style="color: #2c3e50; font-size: 14px;">{{ t.nuclear_medicine_information }}</strong>
+                                    <div class="detail-panel-divider">
+                                        <strong class="detail-panel-title">{{ t.nuclear_medicine_information }}</strong>
                                     </div>
+                                    <table class="detail-table">
                                     {% if s.radiopharmaceutical %}
-                                    <strong>{{ t.radiopharmaceutical }}:</strong> {{ s.radiopharmaceutical }}<br>
+                                    <tr>
+                                        <th>{{ t.radiopharmaceutical }}</th>
+                                        <td>{{ s.radiopharmaceutical }}</td>
+                                    </tr>
                                     {% endif %}
                                     {% if s.injected_activity %}
-                                    <strong>{{ t.injected_activity }}:</strong> {{ "%.2f"|format(s.injected_activity) }} Bq
+                                    {# DICOM standard: RadionuclideTotalDose (0018,1074) is in MBq #}
+                                    {# Check if value is likely in Bq (>1e6) or MBq (<1e6) #}
                                     {% if s.injected_activity > 1e6 %}
-                                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.2f"|format(s.injected_activity / 1e6) }} MBq)</span>
+                                        {# Value is in Bq, convert to MBq for display #}
+                                        <tr>
+                                            <th>{{ t.injected_activity }}</th>
+                                            <td>{{ "%.2f"|format(s.injected_activity / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.injected_activity) }} Bq)</span></td>
+                                        </tr>
+                                    {% else %}
+                                        {# Value is likely in MBq (DICOM standard) #}
+                                        <tr>
+                                            <th>{{ t.injected_activity }}</th>
+                                            <td>{{ "%.2f"|format(s.injected_activity) }} MBq</td>
+                                        </tr>
                                     {% endif %}
-                                    <br>
                                     {% endif %}
                                     {% if s.injection_time_formatted or s.injection_time %}
-                                    <strong>{{ t.injection_time }}:</strong> {{ s.injection_time_formatted or s.injection_time }}{% if s.injection_date_formatted %} ({{ s.injection_date_formatted }}){% endif %}<br>
+                                    <tr>
+                                        <th>{{ t.injection_time }}</th>
+                                        <td>{{ s.injection_time_formatted or s.injection_time }}{% if s.injection_date_formatted %} ({{ s.injection_date_formatted }}){% endif %}</td>
+                                    </tr>
                                     {% endif %}
                                     {% if s.half_life %}
-                                    <strong>{{ t.half_life }}:</strong> {{ "%.2f"|format(s.half_life) }} s
+                                    <tr>
+                                        <th>{{ t.half_life }}</th>
+                                        <td>{{ "%.2f"|format(s.half_life) }} s
                                     {% if s.half_life > 60 %}
                                         <span style="color: #7f8c8d; font-size: 12px;">({{ "%.1f"|format(s.half_life / 60) }} min)</span>
                                     {% endif %}
-                                    <br>
+                                        </td>
+                                    </tr>
                                     {% endif %}
                                     {% if s.decay_correction %}
-                                    <strong>{{ t.decay_correction }}:</strong> {{ s.decay_correction }}<br>
+                                    <tr>
+                                        <th>{{ t.decay_correction }}</th>
+                                        <td>{{ s.decay_correction }}</td>
+                                    </tr>
                                     {% endif %}
                                     {% if s.radiopharmaceutical_volume %}
-                                    <strong>{{ t.radiopharmaceutical_volume }}:</strong> {{ "%.2f"|format(s.radiopharmaceutical_volume) }} ml<br>
+                                    <tr>
+                                        <th>{{ t.radiopharmaceutical_volume }}</th>
+                                        <td>{{ "%.2f"|format(s.radiopharmaceutical_volume) }} ml</td>
+                                    </tr>
                                     {% endif %}
                                     {% if s.radionuclide_total_dose and s.radionuclide_total_dose != s.injected_activity %}
-                                    <strong>{{ t.radionuclide_total_dose }}:</strong> {{ "%.2f"|format(s.radionuclide_total_dose) }} Bq
+                                    {# DICOM standard: RadionuclideTotalDose (0018,1074) is in MBq #}
                                     {% if s.radionuclide_total_dose > 1e6 %}
-                                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.2f"|format(s.radionuclide_total_dose / 1e6) }} MBq)</span>
+                                        {# Value is in Bq, convert to MBq for display #}
+                                        <tr>
+                                            <th>{{ t.radionuclide_total_dose }}</th>
+                                            <td>{{ "%.2f"|format(s.radionuclide_total_dose / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.radionuclide_total_dose) }} Bq)</span></td>
+                                        </tr>
+                                    {% else %}
+                                        {# Value is likely in MBq (DICOM standard) #}
+                                        <tr>
+                                            <th>{{ t.radionuclide_total_dose }}</th>
+                                            <td>{{ "%.2f"|format(s.radionuclide_total_dose) }} MBq</td>
+                                        </tr>
                                     {% endif %}
-                                    <br>
                                     {% endif %}
                                     {% if s.activity_at_scan %}
-                                    <strong>{{ t.activity_at_scan }}:</strong> {{ "%.2f"|format(s.activity_at_scan) }} Bq
+                                    {# Activity at scan is calculated in Bq, but display in MBq for consistency with DICOM standards #}
                                     {% if s.activity_at_scan > 1e6 %}
-                                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.2f"|format(s.activity_at_scan / 1e6) }} MBq)</span>
+                                        <tr>
+                                            <th>{{ t.activity_at_scan }}</th>
+                                            <td>{{ "%.2f"|format(s.activity_at_scan / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.activity_at_scan) }} Bq)</span>
+                                    {% else %}
+                                        {# Very small values, show in MBq with Bq in parentheses #}
+                                        <tr>
+                                            <th>{{ t.activity_at_scan }}</th>
+                                            <td>{{ "%.2f"|format(s.activity_at_scan / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.activity_at_scan) }} Bq)</span>
                                     {% endif %}
                                     {% if s.decay_percent %}
                                         <span style="color: #7f8c8d; font-size: 12px;">({{ "%.1f"|format(s.decay_percent) }}% {{ t.decayed }})</span>
                                     {% endif %}
-                                    <br>
+                                            </td>
+                                        </tr>
                                     {% endif %}
                                     {% if s.activity_per_kg %}
-                                    <strong>{{ t.activity_per_kg }}:</strong> {{ "%.2f"|format(s.activity_per_kg) }} Bq/kg<br>
+                                    {# Activity per kg: convert to MBq/kg for display #}
+                                    {% if s.activity_per_kg > 1e6 %}
+                                        <tr>
+                                            <th>{{ t.activity_per_kg }}</th>
+                                            <td>{{ "%.2f"|format(s.activity_per_kg / 1e6) }} MBq/kg <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.activity_per_kg) }} Bq/kg)</span></td>
+                                        </tr>
+                                    {% else %}
+                                        {# Value is likely already in MBq/kg #}
+                                        <tr>
+                                            <th>{{ t.activity_per_kg }}</th>
+                                            <td>{{ "%.2f"|format(s.activity_per_kg) }} MBq/kg</td>
+                                        </tr>
                                     {% endif %}
                                     {% endif %}
+                                    </table>
+                                    {% endif %}
+
                                 </div>
                             </td>
                         </tr>
@@ -503,17 +1479,305 @@
             {% endif %}
         </div>
     </div>
+
+    <div id="export-modal" class="export-modal" aria-hidden="true">
+        <div class="export-modal-content" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
+            <div class="export-modal-header">
+                <h3 id="export-modal-title">{{ t.export_csv_title }}</h3>
+                <button type="button" class="export-modal-close" data-export-close aria-label="{{ t.close }}">×</button>
+            </div>
+            <div class="export-modal-body">
+                <div class="export-modal-actions">
+                    <div>
+                        <strong>{{ t.export_select_fields }}</strong>
+                    </div>
+                    <div class="export-action-group">
+                        <button type="button" class="export-small-button" id="export-select-all">{{ t.export_select_all }}</button>
+                        <button type="button" class="export-small-button" id="export-select-none">{{ t.export_select_none }}</button>
+                    </div>
+                </div>
+                <div class="export-sections">
+                    {% for section in export_sections %}
+                    <div class="export-section">
+                        <label class="export-section-header">
+                            <input type="checkbox" class="export-section-toggle" data-export-section="{{ section.key }}">
+                            <span>{{ section.label }}</span>
+                        </label>
+                        <div class="export-field-grid">
+                            {% for field in section.fields %}
+                            <label class="export-field">
+                                <input
+                                    type="checkbox"
+                                    class="export-field-toggle"
+                                    data-export-field="{{ field.name }}"
+                                    data-section="{{ section.key }}"
+                                    {% if field.default %}checked{% endif %}
+                                >
+                                <span>{{ field.label }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% if export_modalities %}
+                    <div class="export-section">
+                        <div class="export-section-header">{{ t.modalities }}</div>
+                        <div class="export-modal-actions" style="margin-bottom: 12px;">
+                            <div class="export-action-group">
+                                <button type="button" class="export-small-button" id="export-modalities-all">{{ t.export_select_all }}</button>
+                                <button type="button" class="export-small-button" id="export-modalities-none">{{ t.export_select_none }}</button>
+                            </div>
+                        </div>
+                        <div class="export-field-grid">
+                            {% for modality in export_modalities %}
+                            <label class="export-field">
+                                <input
+                                    type="checkbox"
+                                    class="export-modality-toggle"
+                                    data-export-modality="{{ modality }}"
+                                    checked
+                                >
+                                <span>{{ modality }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="export-modal-footer">
+                <button type="button" class="export-secondary" data-export-close>{{ t.cancel }}</button>
+                <button type="button" class="export-primary" id="export-confirm">{{ t.export_download }}</button>
+            </div>
+        </div>
+    </div>
     
     <script>
-        function toggleDetails(id) {
+        function toggleDetails(id, triggerEl) {
             const el = document.getElementById(id);
             if (el.style.display === 'none') {
                 el.style.display = '';
+                if (triggerEl) {
+                    triggerEl.textContent = triggerEl.dataset.hide || 'Hide Details';
+                }
             } else {
                 el.style.display = 'none';
+                if (triggerEl) {
+                    triggerEl.textContent = triggerEl.dataset.show || 'Show Details';
+                }
             }
+        }
+    </script>
+    <script>
+        const studyMenuButton = document.getElementById('top-study-hamburger');
+        const studyMenu = document.getElementById('top-study-menu');
+        const themeToggleButton = document.getElementById('theme-toggle');
+        const exportModal = document.getElementById('export-modal');
+        const exportOpenButton = document.getElementById('export-csv-button');
+        const exportCloseButtons = document.querySelectorAll('[data-export-close]');
+        const exportSelectAll = document.getElementById('export-select-all');
+        const exportSelectNone = document.getElementById('export-select-none');
+        const exportConfirm = document.getElementById('export-confirm');
+        const exportFields = Array.from(document.querySelectorAll('.export-field-toggle'));
+        const exportSectionToggles = Array.from(document.querySelectorAll('.export-section-toggle'));
+        const exportModalities = Array.from(document.querySelectorAll('.export-modality-toggle'));
+        const exportModalitySelectAll = document.getElementById('export-modalities-all');
+        const exportModalitySelectNone = document.getElementById('export-modalities-none');
+
+        function createDatabank() {
+            const name = prompt('New databank name');
+            if (!name) {
+                return;
+            }
+            const formData = new FormData();
+            formData.append('name', name);
+            fetch('/databanks/create', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const target = `/?db=${encodeURIComponent(data.name)}&lang={{ lang }}`;
+                    window.location.href = target;
+                } else {
+                    alert(data.message || 'Failed to create databank.');
+                }
+            })
+            .catch(error => {
+                alert(error.message || 'Failed to create databank.');
+            });
+            if (studyMenuButton && studyMenu) {
+                studyMenuButton.setAttribute('aria-expanded', 'false');
+                studyMenu.classList.remove('open');
+            }
+        }
+
+        if (studyMenuButton && studyMenu) {
+            studyMenuButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const expanded = studyMenuButton.getAttribute('aria-expanded') === 'true';
+                studyMenuButton.setAttribute('aria-expanded', String(!expanded));
+                studyMenu.classList.toggle('open', !expanded);
+            });
+
+            document.addEventListener('click', (event) => {
+                if (!studyMenu.contains(event.target) && !studyMenuButton.contains(event.target)) {
+                    studyMenuButton.setAttribute('aria-expanded', 'false');
+                    studyMenu.classList.remove('open');
+                }
+            });
+        }
+
+        function closeTopStudyMenu() {
+            if (studyMenuButton && studyMenu) {
+                studyMenuButton.setAttribute('aria-expanded', 'false');
+                studyMenu.classList.remove('open');
+            }
+        }
+
+        function applyTheme(theme) {
+            const isDark = theme === 'dark';
+            document.body.classList.toggle('dark', isDark);
+            if (themeToggleButton) {
+                const nextLabel = isDark
+                    ? (themeToggleButton.dataset.light || 'Light Mode')
+                    : (themeToggleButton.dataset.dark || 'Dark Mode');
+                const nextIcon = isDark
+                    ? (themeToggleButton.dataset.lightIcon || 'ph-sun')
+                    : (themeToggleButton.dataset.darkIcon || 'ph-moon');
+                themeToggleButton.innerHTML = `<i class="ph ${nextIcon}" aria-hidden="true"></i>`;
+                themeToggleButton.setAttribute('aria-label', nextLabel);
+                themeToggleButton.setAttribute('title', nextLabel);
+            }
+            localStorage.setItem('theme', theme);
+        }
+
+        if (themeToggleButton) {
+            themeToggleButton.addEventListener('click', () => {
+                const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
+                applyTheme(nextTheme);
+                closeTopStudyMenu();
+            });
+        }
+
+        const storedTheme = localStorage.getItem('theme') || 'light';
+        applyTheme(storedTheme);
+
+        function openExportModal() {
+            if (!exportModal) {
+                return;
+            }
+            exportModal.classList.add('open');
+            exportModal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeExportModal() {
+            if (!exportModal) {
+                return;
+            }
+            exportModal.classList.remove('open');
+            exportModal.setAttribute('aria-hidden', 'true');
+        }
+
+        function updateSectionState(sectionKey) {
+            const sectionFields = exportFields.filter(field => field.dataset.section === sectionKey);
+            const toggle = exportSectionToggles.find(field => field.dataset.exportSection === sectionKey);
+            if (!toggle) {
+                return;
+            }
+            const allChecked = sectionFields.every(field => field.checked);
+            const anyChecked = sectionFields.some(field => field.checked);
+            toggle.checked = allChecked;
+            toggle.indeterminate = !allChecked && anyChecked;
+        }
+
+        if (exportOpenButton) {
+            exportOpenButton.addEventListener('click', () => {
+                openExportModal();
+            });
+        }
+
+        exportCloseButtons.forEach(button => {
+            button.addEventListener('click', closeExportModal);
+        });
+
+        if (exportModal) {
+            exportModal.addEventListener('click', (event) => {
+                if (event.target === exportModal) {
+                    closeExportModal();
+                }
+            });
+        }
+
+        exportSectionToggles.forEach(toggle => {
+            toggle.addEventListener('change', () => {
+                const sectionKey = toggle.dataset.exportSection;
+                exportFields
+                    .filter(field => field.dataset.section === sectionKey)
+                    .forEach(field => {
+                        field.checked = toggle.checked;
+                    });
+                updateSectionState(sectionKey);
+            });
+        });
+
+        exportFields.forEach(field => {
+            field.addEventListener('change', () => {
+                updateSectionState(field.dataset.section);
+            });
+        });
+
+        exportSectionToggles.forEach(toggle => updateSectionState(toggle.dataset.exportSection));
+
+        if (exportSelectAll) {
+            exportSelectAll.addEventListener('click', () => {
+                exportFields.forEach(field => { field.checked = true; });
+                exportSectionToggles.forEach(toggle => updateSectionState(toggle.dataset.exportSection));
+            });
+        }
+
+        if (exportSelectNone) {
+            exportSelectNone.addEventListener('click', () => {
+                exportFields.forEach(field => { field.checked = false; });
+                exportSectionToggles.forEach(toggle => updateSectionState(toggle.dataset.exportSection));
+            });
+        }
+
+        if (exportModalitySelectAll) {
+            exportModalitySelectAll.addEventListener('click', () => {
+                exportModalities.forEach(field => { field.checked = true; });
+            });
+        }
+
+        if (exportModalitySelectNone) {
+            exportModalitySelectNone.addEventListener('click', () => {
+                exportModalities.forEach(field => { field.checked = false; });
+            });
+        }
+
+        if (exportConfirm) {
+            exportConfirm.addEventListener('click', () => {
+                const selected = exportFields
+                    .filter(field => field.checked)
+                    .map(field => field.dataset.exportField);
+                if (selected.length === 0) {
+                    alert('{{ t.export_select_one }}');
+                    return;
+                }
+                const params = new URLSearchParams();
+                params.set('db', '{{ db_name }}');
+                params.set('lang', '{{ lang }}');
+                selected.forEach(field => params.append('fields', field));
+                exportModalities
+                    .filter(field => field.checked)
+                    .map(field => field.dataset.exportModality)
+                    .forEach(modality => params.append('modality', modality));
+                const url = `/study/{{ study_info.study_instance_uid }}/export.csv?${params.toString()}`;
+                window.location.href = url;
+                closeExportModal();
+            });
         }
     </script>
 </body>
 </html>
-

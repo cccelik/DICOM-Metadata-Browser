@@ -7,7 +7,6 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional
 from extract_metadata import DICOMMetadata
-import json
 
 DB_SCHEMA = """
 CREATE TABLE IF NOT EXISTS dicom_metadata (
@@ -38,6 +37,7 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     series_date TEXT,
     series_time TEXT,
     series_description TEXT,
+    protocol_name TEXT,
     modality TEXT,
     body_part_examined TEXT,
     
@@ -53,7 +53,19 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     -- Acquisition Information
     acquisition_date TEXT,
     acquisition_time TEXT,
+    patient_position TEXT,
+    scanning_sequence TEXT,
+    sequence_variant TEXT,
+    scan_options TEXT,
+    acquisition_type TEXT,
     slice_thickness REAL,
+    reconstruction_diameter REAL,
+    reconstruction_algorithm TEXT,
+    convolution_kernel TEXT,
+    filter_type TEXT,
+    spiral_pitch_factor REAL,
+    ctdivol REAL,
+    dlp REAL,
     kvp REAL,
     exposure_time REAL,
     exposure REAL,
@@ -77,7 +89,15 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     pixel_spacing TEXT,
     image_orientation_patient TEXT,
     slice_location REAL,
+    number_of_frames INTEGER,
+    frame_time REAL,
     number_of_slices INTEGER,
+
+    -- Private (CTP anonymizer) metadata
+    ctp_collection TEXT,
+    ctp_subject_id TEXT,
+    ctp_private_flag_raw TEXT,
+    ctp_private_flag_int INTEGER,
     
     
     -- Timestamps
@@ -138,6 +158,34 @@ def init_database(db_path: str, optimize: bool = True):
         conn.execute("PRAGMA optimize")
     
     conn.executescript(DB_SCHEMA)
+
+    # Ensure new columns exist in older databases
+    cursor = conn.execute("PRAGMA table_info(dicom_metadata)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    migrations = [
+        ("ctp_collection", "TEXT"),
+        ("ctp_subject_id", "TEXT"),
+        ("ctp_private_flag_raw", "TEXT"),
+        ("ctp_private_flag_int", "INTEGER"),
+        ("protocol_name", "TEXT"),
+        ("patient_position", "TEXT"),
+        ("scanning_sequence", "TEXT"),
+        ("sequence_variant", "TEXT"),
+        ("scan_options", "TEXT"),
+        ("acquisition_type", "TEXT"),
+        ("reconstruction_diameter", "REAL"),
+        ("reconstruction_algorithm", "TEXT"),
+        ("convolution_kernel", "TEXT"),
+        ("filter_type", "TEXT"),
+        ("spiral_pitch_factor", "REAL"),
+        ("ctdivol", "REAL"),
+        ("dlp", "REAL"),
+        ("number_of_frames", "INTEGER"),
+        ("frame_time", "REAL"),
+    ]
+    for col_name, col_type in migrations:
+        if col_name not in existing_cols:
+            conn.execute(f"ALTER TABLE dicom_metadata ADD COLUMN {col_name} {col_type}")
     conn.commit()
     return conn
 
@@ -178,10 +226,6 @@ def insert_metadata(conn: sqlite3.Connection, metadata: DICOMMetadata, file_path
     Returns:
         tuple: (inserted: bool, reason: str)
     """
-    # Skip if series already exists (prevents duplicates)
-    if skip_existing and metadata.series_instance_uid and series_exists(conn, metadata.series_instance_uid):
-        return False, "series_exists"
-    
     data = metadata.to_dict()
     data['file_path'] = file_path
     
@@ -201,8 +245,9 @@ def insert_metadata(conn: sqlite3.Connection, metadata: DICOMMetadata, file_path
         # Check if row was actually inserted
         if cursor.rowcount > 0:
             return True, "inserted"
-        else:
-            return False, "already_exists"
+        if skip_existing and metadata.series_instance_uid:
+            return False, "series_exists"
+        return False, "already_exists"
     except sqlite3.IntegrityError:
         # Series UID already exists (unique constraint)
         if commit:
@@ -294,4 +339,3 @@ def get_studies_summary(db_path: str) -> List[dict]:
     results = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return results
-

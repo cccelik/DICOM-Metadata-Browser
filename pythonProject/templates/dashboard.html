@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ t.dashboard_title or 'Analytics Dashboard' }} - DICOM Metadata Browser</title>
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .lang-toggle {
+            padding: 6px 12px;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #7f8c8d;
+            font-weight: 400;
+        }
+
+        .lang-toggle.active {
+            background: #3498db;
+            color: white;
+            font-weight: 500;
+        }
+
+        .top-bar {
+            width: 100%;
+            background: #fff;
+            border-bottom: 4px solid #4e85e9;
+            color: #0c2e49;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .top-bar-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .top-bar-copy {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.2;
+        }
+
+        .top-bar-copy span,
+        .top-bar-copy strong {
+            font-size: 16px;
+            font-weight: 400;
+        }
+
+        .top-bar-copy {
+            display: flex;
+            flex-direction: column;
+            font-size: 13px;
+            line-height: 1.2;
+        }
+
+        .top-bar-copy strong {
+            font-weight: normal;
+        }
+
+        .top-bar-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            flex: 1;
+            text-align: center;
+        }
+
+        .top-bar-center .title-main {
+            font-size: 20px;
+            font-weight: 600;
+            color: #0c2e49;
+        }
+
+        .top-bar-center .title-sub {
+            font-size: 14px;
+            font-weight: 400;
+            color: #5c6b84;
+        }
+
+        .top-bar-right {
+            font-size: 13px;
+            text-align: right;
+            line-height: 1.3;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 4px;
+        }
+
+        .top-bar-right img {
+            height: 100px;
+        }
+
+        .hamburger-wrapper {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .hamburger-button {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.2);
+            background: transparent;
+            cursor: pointer;
+            display: inline-flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 6px;
+            padding: 0;
+        }
+
+        .hamburger-button span {
+            display: block;
+            width: 20px;
+            height: 2px;
+            background: #0c2e49;
+            border-radius: 4px;
+        }
+
+        .hamburger-menu {
+            position: absolute;
+            top: 48px;
+            left: 0;
+            background: white;
+            color: #0c2e49;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+            overflow: hidden;
+            min-width: 180px;
+            transform-origin: top left;
+            transform: scale(0.95);
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.2s ease;
+            z-index: 10;
+        }
+
+        .hamburger-menu.open {
+            transform: scale(1);
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .hamburger-menu a,
+        .hamburger-menu button {
+            display: block;
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            color: inherit;
+            font-size: 14px;
+            text-decoration: none;
+            background: transparent;
+            border: none;
+            text-align: left;
+            width: 100%;
+            cursor: pointer;
+        }
+
+        .hamburger-lang {
+            display: flex;
+            gap: 6px;
+            padding: 8px 16px;
+            justify-content: space-between;
+        }
+
+        .theme-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .theme-toggle i {
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .hamburger-menu-inner {
+            padding-bottom: 8px;
+        }
+
+        body.dark {
+            background: #0f141b;
+            color: #e6edf3;
+        }
+
+        body.dark .top-bar {
+            background: #121a24;
+            border-bottom-color: #2a3b52;
+            color: #e6edf3;
+        }
+
+        body.dark .top-bar-center .title-main,
+        body.dark .top-bar-copy span,
+        body.dark .top-bar-copy strong {
+            color: #e6edf3;
+        }
+
+        body.dark .top-bar-center .title-sub {
+            color: #9aa7b5;
+        }
+
+        body.dark .top-bar-right img {
+            filter: brightness(1.6) contrast(1.1);
+        }
+
+        body.dark .hamburger-button {
+            border-color: #2a3b52;
+        }
+
+        body.dark .hamburger-button span {
+            background: #e6edf3;
+        }
+
+        body.dark .hamburger-menu {
+            background: #18212d;
+            color: #e6edf3;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        }
+
+        body.dark .hamburger-menu a,
+        body.dark .hamburger-menu button {
+            border-bottom: 1px solid #243244;
+        }
+
+        body.dark .lang-toggle {
+            color: #9aa7b5;
+        }
+
+        body.dark .lang-toggle.active {
+            background: #2a62b8;
+            color: #fff;
+        }
+
+        body.dark .protocol-adherence,
+        body.dark .card,
+        body.dark .distribution-info,
+        body.dark .stat-box {
+            background: #141c26;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.35);
+        }
+
+        body.dark .metric-label,
+        body.dark h2,
+        body.dark .stat-label,
+        body.dark .stat-value,
+        body.dark .metric-value,
+        body.dark .distribution-info strong {
+            color: #e6edf3;
+        }
+
+        body.dark table th {
+            background: #1e2936;
+            color: #e6edf3;
+        }
+
+        body.dark table th,
+        body.dark table td {
+            border-bottom-color: #243244;
+        }
+
+
+        body.dark .badge-primary {
+            background: #2a62b8;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .nav-links {
+            margin-top: 15px;
+        }
+        
+        .nav-links a {
+            color: #3498db;
+            text-decoration: none;
+            margin-right: 20px;
+            padding: 8px 16px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        
+        .nav-links a:hover {
+            background: #ecf0f1;
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .card h2 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 20px;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-box {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #7f8c8d;
+            text-transform: uppercase;
+        }
+        
+        .ideal-value {
+            color: #27ae60;
+        }
+        
+        .deviation {
+            color: #e67e22;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 20px;
+        }
+
+        
+        .protocol-adherence {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .protocol-adherence h2 {
+            color: white;
+            border-bottom: 2px solid rgba(255,255,255,0.3);
+        }
+        
+        .adherence-metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .adherence-metric:last-child {
+            border-bottom: none;
+        }
+        
+        .metric-label {
+            font-size: 16px;
+        }
+        
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 15px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: rgba(255,255,255,0.8);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #2c3e50;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        
+        .distribution-info {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .distribution-info strong {
+            color: #2c3e50;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        
+        table th, table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+        
+        table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .badge-primary {
+            background: #3498db;
+            color: white;
+        }
+
+        .databank-item {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid #d7dde4;
+            background: #f8f9fb;
+            font-size: 12px;
+            color: #2c3e50;
+            transition: all 0.2s ease;
+        }
+
+        .databank-item:hover {
+            border-color: #4e85e9;
+            color: #1f4b99;
+            background: #eef4ff;
+        }
+
+        .databank-item.active {
+            background: #0c2e49;
+            border-color: #0c2e49;
+            color: #fff;
+        }
+
+        .databank-create {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px dashed #4e85e9;
+            background: #f5f9ff;
+            color: #1f4b99;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .databank-create:hover {
+            background: #e6f0ff;
+            border-color: #2f6fe0;
+        }
+
+        .hamburger-section-title {
+            padding: 10px 16px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #7f8c8d;
+            background: #f5f7fa;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .hamburger-databanks {
+            padding: 10px 12px 14px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        body.dark .databank-item {
+            background: #0f141b;
+            border-color: #2a3b52;
+            color: #e6edf3;
+        }
+
+        body.dark .databank-item:hover {
+            border-color: #4e85e9;
+            color: #cfe0ff;
+            background: #18263a;
+        }
+
+        body.dark .databank-item.active {
+            background: #4e85e9;
+            border-color: #4e85e9;
+            color: #0b1320;
+        }
+
+        body.dark .databank-create {
+            background: #152235;
+            border-color: #4e85e9;
+            color: #cfe0ff;
+        }
+
+        body.dark .databank-create:hover {
+            background: #1b2a40;
+        }
+
+        body.dark .hamburger-section-title {
+            color: #9aa7b5;
+            background: #121a24;
+            border-bottom-color: #243244;
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="top-bar-left">
+            <div class="hamburger-wrapper">
+                <button id="top-dashboard-hamburger" class="hamburger-button" aria-label="Open menu" aria-expanded="false" aria-controls="top-dashboard-menu">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+                <div id="top-dashboard-menu" class="hamburger-menu">
+                    <div class="hamburger-menu-inner">
+                        <a href="/?db={{ db_name }}&lang={{ lang }}">{{ t.back_to_studies or 'Back to Studies' }}</a>
+                        <a href="/dashboard?db={{ db_name }}&lang={{ lang }}">{{ t.dashboard or 'Dashboard' }}</a>
+                        <button
+                            type="button"
+                            id="theme-toggle"
+                            class="theme-toggle"
+                            data-dark="{{ t.dark_mode }}"
+                            data-light="{{ t.light_mode }}"
+                            data-dark-icon="ph-moon"
+                            data-light-icon="ph-sun"
+                            aria-label="{{ t.dark_mode }}"
+                            title="{{ t.dark_mode }}"
+                        ><i class="ph ph-moon" aria-hidden="true"></i></button>
+                    </div>
+                    <div class="hamburger-lang">
+                        <a href="/dashboard?db={{ db_name }}&lang=en" class="lang-toggle {% if lang == 'en' %}active{% endif %}">EN</a>
+                        <a href="/dashboard?db={{ db_name }}&lang=de" class="lang-toggle {% if lang == 'de' %}active{% endif %}">DE</a>
+                    </div>
+                    <div class="hamburger-section-title">Databanks</div>
+                    <div class="hamburger-databanks">
+                        {% if databanks %}
+                            {% for bank in databanks %}
+                            <a href="/dashboard?db={{ bank }}&lang={{ lang }}" class="databank-item {% if bank == db_name %}active{% endif %}">{{ bank }}</a>
+                            {% endfor %}
+                        {% else %}
+                            <span class="subtitle">No databanks found in Databanks/</span>
+                        {% endif %}
+                        <button type="button" class="databank-create" onclick="createDatabank();">Create databank</button>
+                    </div>
+                </div>
+            </div>
+            <div class="top-bar-copy">
+                <span>{{ t.top_bar_primary }}</span>
+                <strong>{{ t.top_bar_secondary }}</strong>
+            </div>
+        </div>
+        <div class="top-bar-center">
+            <span class="title-main">DICOM Metadata Browser</span>
+            <span class="title-sub">{{ t.dashboard_title or 'Analytics Dashboard' }}</span>
+        </div>
+        <div class="top-bar-right">
+            <img src="{{ url_for('tum_logo') }}" alt="TUM Logo">
+        </div>
+    </div>
+    <div class="container">
+        <!-- Protocol Adherence Overview -->
+        <div class="protocol-adherence">
+            <h2>{{ t.protocol_adherence or 'Protocol Adherence' }}</h2>
+            
+            {% if stats.uptake_time.count > 0 %}
+            <div class="adherence-metric">
+                <div>
+                    <div class="metric-label">{{ t.uptake_time_adherence or 'Uptake Time Adherence' }}</div>
+                    <div style="font-size: 14px; opacity: 0.9; margin-top: 5px;">
+                        {{ t.ideal_uptake_time or 'Ideal' }}: {{ stats.uptake_time.ideal }} {{ t.minutes or 'minutes' }} (±15 {{ t.minutes or 'minutes' }})
+                    </div>
+                </div>
+                <div class="metric-value">
+                    {{ "%.1f"|format((stats.uptake_time.within_ideal_range / stats.uptake_time.count * 100) if stats.uptake_time.count > 0 else 0) }}%
+                </div>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: {{ (stats.uptake_time.within_ideal_range / stats.uptake_time.count * 100) if stats.uptake_time.count > 0 else 0 }}%">
+                    {{ stats.uptake_time.within_ideal_range }} / {{ stats.uptake_time.count }} {{ t.series or 'series' }}
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if stats.dose_per_kg.count > 0 %}
+            <div class="adherence-metric">
+                <div>
+                    <div class="metric-label">{{ t.dose_adherence or 'Dose per kg Adherence' }}</div>
+                    <div style="font-size: 14px; opacity: 0.9; margin-top: 5px;">
+                        {{ t.ideal_dose or 'Ideal' }}: {{ stats.dose_per_kg.ideal }} {{ t.mbq_kg or 'MBq/kg' }} (±0.5 {{ t.mbq_kg or 'MBq/kg' }})
+                    </div>
+                </div>
+                <div class="metric-value">
+                    {{ "%.1f"|format((stats.dose_per_kg.within_ideal_range / stats.dose_per_kg.count * 100) if stats.dose_per_kg.count > 0 else 0) }}%
+                </div>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: {{ (stats.dose_per_kg.within_ideal_range / stats.dose_per_kg.count * 100) if stats.dose_per_kg.count > 0 else 0 }}%">
+                    {{ stats.dose_per_kg.within_ideal_range }} / {{ stats.dose_per_kg.count }} {{ t.series or 'series' }}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        
+        <div class="dashboard-grid">
+            <!-- Uptake Time Distribution -->
+            {% if stats.uptake_time.count > 0 %}
+            <div class="card">
+                <h2>{{ t.uptake_time_distribution or 'Injection-to-Scan Time Distribution' }}</h2>
+                <div class="stat-grid">
+                    <div class="stat-box">
+                        <div class="stat-value ideal-value">{{ "%.1f"|format(stats.uptake_time.ideal) }}</div>
+                        <div class="stat-label">{{ t.ideal_time or 'Ideal (min)' }}</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ "%.1f"|format(stats.uptake_time.mean) if stats.uptake_time.mean else 'N/A' }}</div>
+                        <div class="stat-label">{{ t.mean or 'Mean (min)' }}</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ "%.1f"|format(stats.uptake_time.median) if stats.uptake_time.median else 'N/A' }}</div>
+                        <div class="stat-label">{{ t.median or 'Median (min)' }}</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ "%.1f"|format(stats.uptake_time.std_dev) if stats.uptake_time.std_dev else 'N/A' }}</div>
+                        <div class="stat-label">{{ t.std_dev or 'Std Dev' }}</div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="uptakeTimeChart"></canvas>
+                </div>
+                <div class="distribution-info">
+                    <strong>{{ t.range or 'Range' }}:</strong> 
+                    {{ "%.1f"|format(stats.uptake_time.min) if stats.uptake_time.min else 'N/A' }} - 
+                    {{ "%.1f"|format(stats.uptake_time.max) if stats.uptake_time.max else 'N/A' }} {{ t.minutes or 'minutes' }}<br>
+                    <strong>{{ t.series_count or 'Series Count' }}:</strong> {{ stats.uptake_time.count }}
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- Dose per kg Distribution -->
+            {% if stats.dose_per_kg.count > 0 %}
+            <div class="card">
+                <h2>{{ t.dose_distribution or 'Injected Dose per kg Distribution' }}</h2>
+                <div class="stat-grid">
+                    <div class="stat-box">
+                        <div class="stat-value ideal-value">{{ "%.1f"|format(stats.dose_per_kg.ideal) }}</div>
+                        <div class="stat-label">{{ t.ideal_dose or 'Ideal (MBq/kg)' }}</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ "%.2f"|format(stats.dose_per_kg.mean) if stats.dose_per_kg.mean else 'N/A' }}</div>
+                        <div class="stat-label">{{ t.mean or 'Mean (MBq/kg)' }}</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ "%.2f"|format(stats.dose_per_kg.median) if stats.dose_per_kg.median else 'N/A' }}</div>
+                        <div class="stat-label">{{ t.median or 'Median (MBq/kg)' }}</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ "%.2f"|format(stats.dose_per_kg.std_dev) if stats.dose_per_kg.std_dev else 'N/A' }}</div>
+                        <div class="stat-label">{{ t.std_dev or 'Std Dev' }}</div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="doseChart"></canvas>
+                </div>
+                <div class="distribution-info">
+                    <strong>{{ t.range or 'Range' }}:</strong> 
+                    {{ "%.2f"|format(stats.dose_per_kg.min) if stats.dose_per_kg.min else 'N/A' }} - 
+                    {{ "%.2f"|format(stats.dose_per_kg.max) if stats.dose_per_kg.max else 'N/A' }} {{ t.mbq_kg or 'MBq/kg' }}<br>
+                    <strong>{{ t.series_count or 'Series Count' }}:</strong> {{ stats.dose_per_kg.count }}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Additional Statistics -->
+        <div class="dashboard-grid">
+            <!-- Radiopharmaceuticals -->
+            {% if stats.radiopharmaceuticals %}
+            <div class="card">
+                <h2>{{ t.radiopharmaceuticals or 'Radiopharmaceuticals' }}</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.radiopharmaceutical or 'Radiopharmaceutical' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for rad, count in stats.radiopharmaceuticals.items() %}
+                        <tr>
+                            <td>{{ rad }}</td>
+                            <td>{{ count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+            
+            <!-- Manufacturers -->
+            {% if stats.manufacturers %}
+            <div class="card">
+                <h2>{{ t.manufacturers or 'Manufacturers' }}</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.manufacturer or 'Manufacturer' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                            <th>{{ t.percentage or 'Percentage' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for mfr, count in stats.manufacturers.items() %}
+                        <tr>
+                            <td>{{ mfr }}</td>
+                            <td>{{ count }}</td>
+                            <td>{{ "%.1f"|format((count / stats.total_series * 100) if stats.total_series > 0 else 0) }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="card">
+                <h2>{{ t.demographics or 'Demographics' }}</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.patient_sex or 'Sex' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sex, count in stats.sex_counts.items() %}
+                        <tr>
+                            <td>{{ sex }}</td>
+                            <td>{{ count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.age_bucket or 'Age Bucket' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for bucket, count in stats.age_buckets.items() %}
+                        <tr>
+                            <td>{{ bucket }}</td>
+                            <td>{{ count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>{{ t.throughput or 'Throughput & Timing' }}</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.study_hour or 'Study Hour' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for hour, count in stats.study_hours.items() %}
+                        <tr>
+                            <td>{{ "%02d"|format(hour) }}:00</td>
+                            <td>{{ count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const storedTheme = localStorage.getItem('theme') || 'light';
+        const isDarkTheme = storedTheme === 'dark';
+        document.body.classList.toggle('dark', isDarkTheme);
+
+        const chartTheme = {
+            text: isDarkTheme ? '#e6edf3' : '#2c3e50',
+            grid: isDarkTheme ? '#243244' : '#ddd',
+            blueFill: isDarkTheme ? 'rgba(86, 173, 255, 0.6)' : 'rgba(52, 152, 219, 0.6)',
+            blueBorder: isDarkTheme ? 'rgba(86, 173, 255, 1)' : 'rgba(52, 152, 219, 1)',
+            orangeFill: isDarkTheme ? 'rgba(243, 156, 18, 0.7)' : 'rgba(230, 126, 34, 0.6)',
+            orangeBorder: isDarkTheme ? 'rgba(243, 156, 18, 1)' : 'rgba(230, 126, 34, 1)',
+            greenLine: 'rgba(39, 174, 96, 1)',
+            tooltipBg: isDarkTheme ? '#1e2936' : 'rgba(0, 0, 0, 0.8)',
+            tooltipText: isDarkTheme ? '#e6edf3' : '#f8f9fa'
+        };
+
+        function getBinWidth(labels) {
+            if (!labels || labels.length < 2) {
+                return null;
+            }
+            const first = parseFloat(labels[0]);
+            const second = parseFloat(labels[1]);
+            if (Number.isNaN(first) || Number.isNaN(second)) {
+                return null;
+            }
+            return Math.abs(second - first);
+        }
+
+        function buildIndexUrl(params) {
+            const urlParams = new URLSearchParams(window.location.search);
+            urlParams.set('db', '{{ db_name }}');
+            urlParams.set('lang', '{{ lang }}');
+            Object.entries(params).forEach(([key, value]) => {
+                if (value === null || value === undefined || value === '') {
+                    urlParams.delete(key);
+                } else {
+                    urlParams.set(key, value);
+                }
+            });
+            return `/?${urlParams.toString()}`;
+        }
+
+        // Uptake Time Chart
+        {% if stats.uptake_time.count > 0 %}
+        const uptakeCtx = document.getElementById('uptakeTimeChart').getContext('2d');
+        const uptakeLabels = {{ uptake_histogram['labels']|tojson }};
+        const uptakeValues = {{ uptake_histogram['values']|tojson }};
+        const maxUptakeValue = uptakeValues.length > 0 ? Math.max(...uptakeValues) : 0;
+        new Chart(uptakeCtx, {
+            type: 'bar',
+            data: {
+                labels: uptakeLabels,
+                datasets: [{
+                    label: '{{ t.series_count or "Series Count" }}',
+                    data: uptakeValues,
+                    backgroundColor: chartTheme.blueFill,
+                    borderColor: chartTheme.blueBorder,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            color: chartTheme.text
+                        },
+                        grid: {
+                            color: chartTheme.grid
+                        },
+                        title: {
+                            display: true,
+                            text: '{{ t.series_count or "Series Count" }}',
+                            color: chartTheme.text
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            color: chartTheme.text
+                        },
+                        grid: {
+                            color: chartTheme.grid
+                        },
+                        title: {
+                            display: true,
+                            text: '{{ t.uptake_time_minutes or "Uptake Time (minutes)" }}',
+                            color: chartTheme.text
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        labels: {
+                            color: chartTheme.text
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: chartTheme.tooltipBg,
+                        titleColor: chartTheme.tooltipText,
+                        bodyColor: chartTheme.tooltipText,
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y;
+                            }
+                        }
+                    }
+                },
+                onClick: (event, elements, chart) => {
+                    if (!elements.length) {
+                        return;
+                    }
+                    const index = elements[0].index;
+                    const labels = chart.data.labels;
+                    const width = getBinWidth(labels);
+                    const start = parseFloat(labels[index]);
+                    if (width === null || Number.isNaN(start)) {
+                        return;
+                    }
+                    const end = start + width;
+                    window.location.href = buildIndexUrl({
+                        uptake_min: start.toFixed(1),
+                        uptake_max: end.toFixed(1)
+                    });
+                }
+            }
+        });
+        {% endif %}
+        
+        // Dose per kg Chart
+        {% if stats.dose_per_kg.count > 0 %}
+        const doseCtx = document.getElementById('doseChart').getContext('2d');
+        const doseLabels = {{ dose_histogram['labels']|tojson }};
+        const doseValues = {{ dose_histogram['values']|tojson }};
+        const maxDoseValue = doseValues.length > 0 ? Math.max(...doseValues) : 0;
+        new Chart(doseCtx, {
+            type: 'bar',
+            data: {
+                labels: doseLabels,
+                datasets: [{
+                    label: '{{ t.series_count or "Series Count" }}',
+                    data: doseValues,
+                    backgroundColor: chartTheme.orangeFill,
+                    borderColor: chartTheme.orangeBorder,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            color: chartTheme.text
+                        },
+                        grid: {
+                            color: chartTheme.grid
+                        },
+                        title: {
+                            display: true,
+                            text: '{{ t.series_count or "Series Count" }}',
+                            color: chartTheme.text
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            color: chartTheme.text
+                        },
+                        grid: {
+                            color: chartTheme.grid
+                        },
+                        title: {
+                            display: true,
+                            text: '{{ t.dose_mbq_kg or "Dose (MBq/kg)" }}',
+                            color: chartTheme.text
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        labels: {
+                            color: chartTheme.text
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: chartTheme.tooltipBg,
+                        titleColor: chartTheme.tooltipText,
+                        bodyColor: chartTheme.tooltipText,
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y;
+                            }
+                        }
+                    }
+                },
+                onClick: (event, elements, chart) => {
+                    if (!elements.length) {
+                        return;
+                    }
+                    const index = elements[0].index;
+                    const labels = chart.data.labels;
+                    const width = getBinWidth(labels);
+                    const start = parseFloat(labels[index]);
+                    if (width === null || Number.isNaN(start)) {
+                        return;
+                    }
+                    const end = start + width;
+                    window.location.href = buildIndexUrl({
+                        dose_min: start.toFixed(2),
+                        dose_max: end.toFixed(2)
+                    });
+                }
+            }
+        });
+        {% endif %}
+    </script>
+    <script>
+        const topMenuButton = document.getElementById('top-dashboard-hamburger');
+        const topMenu = document.getElementById('top-dashboard-menu');
+        const themeToggleButton = document.getElementById('theme-toggle');
+
+        function createDatabank() {
+            const name = prompt('New databank name');
+            if (!name) {
+                return;
+            }
+            const formData = new FormData();
+            formData.append('name', name);
+            fetch('/databanks/create', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const target = `/?db=${encodeURIComponent(data.name)}&lang={{ lang }}`;
+                    window.location.href = target;
+                } else {
+                    alert(data.message || 'Failed to create databank.');
+                }
+            })
+            .catch(error => {
+                alert(error.message || 'Failed to create databank.');
+            });
+            if (topMenuButton && topMenu) {
+                topMenuButton.setAttribute('aria-expanded', 'false');
+                topMenu.classList.remove('open');
+            }
+        }
+
+        if (topMenuButton && topMenu) {
+            topMenuButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const expanded = topMenuButton.getAttribute('aria-expanded') === 'true';
+                topMenuButton.setAttribute('aria-expanded', String(!expanded));
+                topMenu.classList.toggle('open', !expanded);
+            });
+
+            document.addEventListener('click', (event) => {
+                if (!topMenu.contains(event.target) && !topMenuButton.contains(event.target)) {
+                    topMenuButton.setAttribute('aria-expanded', 'false');
+                    topMenu.classList.remove('open');
+                }
+            });
+        }
+
+        function closeTopDashboardMenu() {
+            if (topMenuButton && topMenu) {
+                topMenuButton.setAttribute('aria-expanded', 'false');
+                topMenu.classList.remove('open');
+            }
+        }
+
+        function applyTheme(theme) {
+            const isDark = theme === 'dark';
+            document.body.classList.toggle('dark', isDark);
+            if (themeToggleButton) {
+                const nextLabel = isDark
+                    ? (themeToggleButton.dataset.light || 'Light Mode')
+                    : (themeToggleButton.dataset.dark || 'Dark Mode');
+                const nextIcon = isDark
+                    ? (themeToggleButton.dataset.lightIcon || 'ph-sun')
+                    : (themeToggleButton.dataset.darkIcon || 'ph-moon');
+                themeToggleButton.innerHTML = `<i class="ph ${nextIcon}" aria-hidden="true"></i>`;
+                themeToggleButton.setAttribute('aria-label', nextLabel);
+                themeToggleButton.setAttribute('title', nextLabel);
+            }
+        }
+
+        if (themeToggleButton) {
+            themeToggleButton.addEventListener('click', () => {
+                const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
+                localStorage.setItem('theme', nextTheme);
+                closeTopDashboardMenu();
+                window.location.reload();
+            });
+        }
+
+        applyTheme(storedTheme);
+    </script>
+</body>
+</html>
