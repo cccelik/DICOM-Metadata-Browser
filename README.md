@@ -14,7 +14,7 @@ pip install -r requirements.txt
 
 ### 1) Process DICOMs into SQLite (CLI)
 
-Process a directory of DICOM files (recurses). Database files are stored in `Databanks/` by default:
+Process a directory of DICOM files (recurses). Provide a database name or full path:
 
 ```bash
 python3 process_dicom.py /path/to/dicom_dir dicom_metadata.db
@@ -79,7 +79,7 @@ Use a custom port:
 PORT=5050 python3 webui.py
 ```
 
-Select a different database in the UI by URL parameter (name or file, loaded from `Databanks/`):
+Select a different database in the UI by URL parameter (name or file):
 
 ```
 http://127.0.0.1:5001/?db=another.db
@@ -105,26 +105,12 @@ Include timing and control parallelism:
 python3 extract_metadata.py /path/to/dicom_dir -m 8 -t
 ```
 
-### 4) Inspect DICOM tags for a single file
+## UI files
 
-```bash
-python3 identify_tags.py /path/to/file.dcm
-```
-
-### 5) Generate a mock DICOM for quick testing
-
-```bash
-python3 create_mock_dicom.py
-```
-
-Write the mock file to a custom location:
-
-```bash
-python3 create_mock_dicom.py /tmp/mock_patient.dcm
-```
+- Templates live in `templates/`.
+- Translations are defined in `translations.py`.
 
 ## Notes
 
 - The main database table is `dicom_metadata`.
 - The CLI prevents duplicate series by `SeriesInstanceUID`, so re-processing is safe.
-- Sample data may be available in `MIRROR_A/` or `MIRROR_A.7z`.
