@@ -1496,6 +1496,18 @@
                         <button type="button" class="export-small-button" id="export-select-none">{{ t.export_select_none }}</button>
                     </div>
                 </div>
+                <div class="export-modal-actions" style="justify-content: flex-start; margin-top: 10px;">
+                    <label class="export-field">
+                        <input type="checkbox" id="export-group-modality">
+                        <span>{{ t.export_group_modality }}</span>
+                    </label>
+                </div>
+                <div class="export-modal-actions" style="justify-content: flex-start;">
+                    <label class="export-field">
+                        <input type="checkbox" id="export-sectioned">
+                        <span>{{ t.export_sectioned }}</span>
+                    </label>
+                </div>
                 <div class="export-sections">
                     {% for section in export_sections %}
                     <div class="export-section">
@@ -1578,6 +1590,8 @@
         const exportSelectAll = document.getElementById('export-select-all');
         const exportSelectNone = document.getElementById('export-select-none');
         const exportConfirm = document.getElementById('export-confirm');
+        const exportGroupToggle = document.getElementById('export-group-modality');
+        const exportSectionToggle = document.getElementById('export-sectioned');
         const exportFields = Array.from(document.querySelectorAll('.export-field-toggle'));
         const exportSectionToggles = Array.from(document.querySelectorAll('.export-section-toggle'));
         const exportModalities = Array.from(document.querySelectorAll('.export-modality-toggle'));
@@ -1773,6 +1787,11 @@
                     .filter(field => field.checked)
                     .map(field => field.dataset.exportModality)
                     .forEach(modality => params.append('modality', modality));
+                if (exportSectionToggle && exportSectionToggle.checked) {
+                    params.set('group', 'sectioned');
+                } else if (exportGroupToggle && exportGroupToggle.checked) {
+                    params.set('group', 'modality');
+                }
                 const url = `/study/{{ study_info.study_instance_uid }}/export.csv?${params.toString()}`;
                 window.location.href = url;
                 closeExportModal();

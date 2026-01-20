@@ -39,6 +39,7 @@ EXPORT_SECTIONS = [
             {"name": "patient_age", "label_key": "patient_age"},
             {"name": "patient_weight", "label_key": "patient_weight", "default": True},
             {"name": "patient_size", "label_key": "patient_height", "default": True},
+            {"name": "bmi", "label_key": "bmi"},
         ],
     },
     {
@@ -112,13 +113,14 @@ EXPORT_SECTIONS = [
         "fields": [
             {"name": "radiopharmaceutical", "label_key": "radiopharmaceutical", "default": True},
             {"name": "injected_activity", "label_key": "injected_activity", "default": True},
-            {"name": "injected_activity_unit", "label_key": "injected_activity_unit"},
             {"name": "injection_time", "label_key": "injection_time", "default": True},
             {"name": "injection_date", "label_key": "injection_date", "default": True},
             {"name": "half_life", "label_key": "half_life"},
             {"name": "decay_correction", "label_key": "decay_correction"},
             {"name": "radiopharmaceutical_volume", "label_key": "radiopharmaceutical_volume"},
             {"name": "radionuclide_total_dose", "label_key": "radionuclide_total_dose"},
+            {"name": "uptake_delay", "label_key": "uptake_delay"},
+            {"name": "dose_per_kg", "label_key": "dose_per_kg"},
         ],
     },
     {
@@ -162,6 +164,30 @@ EXPORT_DEFAULT_FIELDS = [
     for field in section["fields"]
     if field.get("default")
 ]
+EXPORT_GROUP_CLEAR_FIELDS = [
+    field["name"]
+    for section in EXPORT_SECTIONS
+    if section["key"] in {"patient", "study"}
+    for field in section["fields"]
+]
+
+EXPORT_DERIVED_FIELDS = {
+    "uptake_delay",
+    "dose_per_kg",
+    "bmi",
+}
+
+EXPORT_DERIVED_DEPENDENCIES = {
+    "injection_date",
+    "injection_time",
+    "acquisition_date",
+    "acquisition_time",
+    "study_date",
+    "study_time",
+    "series_date",
+    "series_time",
+    "injected_activity",
+}
 
 RADIOPHARM_MODALITIES = {
     "PT",  # PET
@@ -303,6 +329,21 @@ def format_injected_activity(value: Optional[object], unit_value: Optional[objec
     return f"{parsed:.2f} MBq"
 
 
+def format_total_dose(value: Optional[object]) -> str:
+    parsed = parse_db_float(value)
+    if parsed is None:
+        return ""
+    if parsed > 1e6:
+        return f"{parsed / 1e6:.2f} MBq"
+    return f"{parsed:.2f} MBq"
+
+
+def format_dose_per_kg(value: Optional[float]) -> str:
+    if value is None:
+        return ""
+    return f"{value:.2f} MBq/kg"
+
+
 def format_export_value(field_name: str, row_dict: dict) -> str:
     value = row_dict.get(field_name)
     if value is None:
@@ -315,6 +356,72 @@ def format_export_value(field_name: str, row_dict: dict) -> str:
         return format_time(value)
     if field_name == "injected_activity":
         return format_injected_activity(value, row_dict.get("injected_activity_unit"))
+    if field_name == "radionuclide_total_dose":
+        return format_total_dose(value)
+    if field_name == "uptake_delay":
+        precomputed_delay = row_dict.get("uptake_delay") or row_dict.get("injection_delay")
+        if precomputed_delay:
+            return str(precomputed_delay)
+        fallback_date = (
+            row_dict.get("study_date")
+            or row_dict.get("acquisition_date")
+            or row_dict.get("series_date")
+        )
+        injection_date = (
+            row_dict.get("injection_date")
+            or row_dict.get("modality_injection_date")
+            or fallback_date
+        )
+        acquisition_date = (
+            row_dict.get("acquisition_date")
+            or row_dict.get("modality_acquisition_date")
+            or fallback_date
+        )
+        injection_time = (
+            row_dict.get("injection_time")
+            or row_dict.get("modality_injection_time")
+        )
+        acquisition_time = (
+            row_dict.get("acquisition_time")
+            or row_dict.get("series_time")
+        )
+        if injection_date and acquisition_date and injection_time and acquisition_time:
+            delay_minutes, _ = calculate_injection_delay(
+                injection_date,
+                injection_time,
+                acquisition_date,
+                acquisition_time,
+                injection_date_missing=(row_dict.get("injection_date") is None),
+                study_time=row_dict.get("study_time")
+            )
+            if delay_minutes and delay_minutes > 0:
+                return format_delay(delay_minutes)
+        return ""
+    if field_name == "dose_per_kg":
+        precomputed_dose = row_dict.get("dose_per_kg") or row_dict.get("activity_per_kg")
+        if isinstance(precomputed_dose, (int, float)):
+            return format_dose_per_kg(float(precomputed_dose))
+        if precomputed_dose:
+            return str(precomputed_dose)
+        patient_weight = get_patient_weight(row_dict)
+        injected_activity = parse_db_float(row_dict.get("injected_activity"))
+        if patient_weight and injected_activity:
+            activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
+            dose_per_kg = activity_mbq / patient_weight
+            if 0 < dose_per_kg < 100:
+                return format_dose_per_kg(dose_per_kg)
+        return ""
+    if field_name == "bmi":
+        patient_weight = parse_db_float(
+            row_dict.get("patient_weight") or row_dict.get("study_patient_weight")
+        )
+        patient_size = parse_db_float(
+            row_dict.get("patient_size") or row_dict.get("study_patient_size")
+        )
+        if patient_weight and patient_size and patient_size > 0:
+            bmi = patient_weight / (patient_size * patient_size)
+            return f"{bmi:.1f}"
+        return ""
     if field_name in EXPORT_NUMERIC_FORMATS:
         unit, decimals = EXPORT_NUMERIC_FORMATS[field_name]
         return format_number_with_unit(value, unit, decimals)
@@ -1100,13 +1207,21 @@ def export_study_csv(study_uid):
     selected_fields = [name for name in EXPORT_FIELD_ORDER if name in requested_fields]
     if not selected_fields:
         selected_fields = list(EXPORT_DEFAULT_FIELDS)
+    group_mode = request.args.get('group')
+    suppress_repeats = group_mode == 'modality'
+    sectioned = group_mode == 'sectioned'
 
     translations = get_translations()
     _, label_map = build_export_sections(translations)
     header = [label_map.get(name, name) for name in selected_fields]
 
     conn = get_db_connection(db_path)
-    column_list = ", ".join(selected_fields)
+    derived_selected = any(field in EXPORT_DERIVED_FIELDS for field in selected_fields)
+    extra_fields = sorted(EXPORT_DERIVED_DEPENDENCIES) if derived_selected else []
+    real_fields = [field for field in selected_fields if field not in EXPORT_DERIVED_FIELDS]
+    select_fields = list(dict.fromkeys(real_fields + extra_fields))
+    select_exprs = [f"r.{field}" for field in select_fields] if select_fields else ["r.study_instance_uid"]
+    column_list = ", ".join(select_exprs)
     modality_filters = [m.strip() for m in request.args.getlist('modality') if m.strip()]
     modality_clause = ""
     params: List[object] = [study_uid]
@@ -1132,21 +1247,92 @@ def export_study_csv(study_uid):
             WHERE s.study_instance_uid = ?{modality_clause}
         )
         SELECT {column_list}
-        FROM ranked
-        WHERE rn = 1
+        FROM ranked r
+        WHERE r.rn = 1
         ORDER BY series_number ASC, series_time ASC, series_instance_uid ASC
         """,
         params
     )
     rows = cursor.fetchall()
+
+    cursor = conn.execute("""
+        SELECT
+            MAX(patient_weight) as patient_weight,
+            MAX(patient_size) as patient_size,
+            MAX(study_date) as study_date,
+            MAX(study_time) as study_time
+        FROM dicom_metadata
+        WHERE study_instance_uid = ?
+        GROUP BY study_instance_uid
+    """, (study_uid,))
+    study_info_row = cursor.fetchone()
     conn.close()
+    study_info = dict(study_info_row) if study_info_row else {}
 
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(header)
-    for row in rows:
+    last_group_values = {}
+    if sectioned:
+        patient_fields = [f for f in selected_fields if f in EXPORT_GROUP_CLEAR_FIELDS]
+        if patient_fields:
+            base_row = dict(rows[0]) if rows else {}
+            base_row["study_patient_weight"] = study_info.get("patient_weight")
+            base_row["study_patient_size"] = study_info.get("patient_size")
+            patient_row = {name: "" for name in selected_fields}
+            for name in patient_fields:
+                if name == "bmi":
+                    patient_weight = parse_db_float(base_row.get("study_patient_weight"))
+                    patient_size = parse_db_float(base_row.get("study_patient_size"))
+                    if patient_weight and patient_size and patient_size > 0:
+                        patient_row[name] = f"{(patient_weight / (patient_size * patient_size)):.1f}"
+                        continue
+                patient_row[name] = format_export_value(name, base_row)
+            writer.writerow([patient_row.get(name, "") for name in selected_fields])
+            writer.writerow([])
+    for index, row in enumerate(rows):
         row_dict = dict(row)
-        writer.writerow([format_export_value(name, row_dict) for name in selected_fields])
+        row_dict["study_patient_weight"] = study_info.get("patient_weight")
+        row_dict["study_patient_size"] = study_info.get("patient_size")
+        if derived_selected:
+            injection_date_to_use = row_dict.get("injection_date") or study_info.get("study_date")
+            acquisition_date_to_use = row_dict.get("acquisition_date") or study_info.get("study_date")
+            if (injection_date_to_use and row_dict.get("injection_time")
+                    and acquisition_date_to_use and row_dict.get("acquisition_time")):
+                delay_minutes, _ = calculate_injection_delay(
+                    injection_date_to_use,
+                    row_dict["injection_time"],
+                    acquisition_date_to_use,
+                    row_dict["acquisition_time"],
+                    injection_date_missing=(row_dict.get("injection_date") is None),
+                    study_time=study_info.get("study_time")
+                )
+                if delay_minutes:
+                    row_dict["uptake_delay"] = format_delay(delay_minutes)
+            injected_activity = parse_db_float(row_dict.get("injected_activity"))
+            patient_weight = get_patient_weight(row_dict)
+            if injected_activity and patient_weight:
+                activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
+                dose_per_kg = activity_mbq / patient_weight
+                if 0 < dose_per_kg < 100:
+                    row_dict["dose_per_kg"] = dose_per_kg
+            patient_size = parse_db_float(
+                row_dict.get("patient_size") or study_info.get("patient_size")
+            )
+            if patient_weight and patient_size and patient_size > 0:
+                row_dict["bmi"] = patient_weight / (patient_size * patient_size)
+        formatted_row = {name: format_export_value(name, row_dict) for name in selected_fields}
+        if sectioned:
+            for field_name in EXPORT_GROUP_CLEAR_FIELDS:
+                if field_name in formatted_row:
+                    formatted_row[field_name] = ""
+        if suppress_repeats and index > 0:
+            for field_name in EXPORT_GROUP_CLEAR_FIELDS:
+                if field_name in formatted_row and formatted_row[field_name] == last_group_values.get(field_name):
+                    formatted_row[field_name] = ""
+        if index == 0:
+            last_group_values = formatted_row.copy()
+        writer.writerow([formatted_row.get(name, "") for name in selected_fields])
 
     conn = get_db_connection(db_path)
     cursor = conn.execute(
