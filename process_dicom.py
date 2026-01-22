@@ -13,6 +13,8 @@ import tempfile
 import shutil
 import time
 import zipfile
+from datetime import datetime
+import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from extract_metadata import extract_metadata_from_paths
@@ -25,6 +27,166 @@ warnings.filterwarnings(
 BASE_DIR = Path(__file__).resolve().parent
 DATABANK_DIR = BASE_DIR / "Databanks"
 DEFAULT_DB_NAME = "dicom_metadata.db"
+
+RADIOPHARM_MODALITIES = {
+    "PT",
+    "PET",
+    "NM",
+    "SPECT",
+    "NM/CT",
+    "PET/CT",
+    "SPECT/CT",
+}
+
+
+def _parse_db_float(value: Optional[object]) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _parse_time_to_24hour(time_str: Optional[object]):
+    if not time_str:
+        return None
+    try:
+        text = str(time_str).strip()
+        if '.' in text:
+            text = text.split('.')[0]
+        if len(text) >= 6:
+            hours = int(text[:2])
+            minutes = int(text[2:4])
+            seconds = int(text[4:6])
+            return hours, minutes, seconds
+    except Exception:
+        return None
+    return None
+
+
+def _calculate_injection_delay(injection_date, injection_time, acquisition_date, acquisition_time):
+    if not injection_date or not injection_time or not acquisition_date or not acquisition_time:
+        return None
+    try:
+        inj_date_str = str(injection_date).strip()
+        acq_date_str = str(acquisition_date).strip()
+        if len(inj_date_str) < 8 or len(acq_date_str) < 8:
+            return None
+        inj_time_parsed = _parse_time_to_24hour(injection_time)
+        acq_time_parsed = _parse_time_to_24hour(acquisition_time)
+        if not inj_time_parsed or not acq_time_parsed:
+            return None
+        inj_dt = datetime(
+            int(inj_date_str[:4]), int(inj_date_str[4:6]), int(inj_date_str[6:8]),
+            inj_time_parsed[0], inj_time_parsed[1], inj_time_parsed[2]
+        )
+        acq_dt = datetime(
+            int(acq_date_str[:4]), int(acq_date_str[4:6]), int(acq_date_str[6:8]),
+            acq_time_parsed[0], acq_time_parsed[1], acq_time_parsed[2]
+        )
+        return (acq_dt - inj_dt).total_seconds() / 60
+    except Exception:
+        return None
+
+
+def _compute_delay_minutes(row: dict) -> Optional[float]:
+    injection_time = row.get("injection_time")
+    acquisition_time = row.get("acquisition_time")
+    injection_date = row.get("injection_date") or row.get("study_date")
+    acquisition_date = row.get("acquisition_date") or row.get("study_date")
+    if not injection_time or not acquisition_time or not injection_date or not acquisition_date:
+        return None
+    return _calculate_injection_delay(injection_date, injection_time, acquisition_date, acquisition_time)
+
+
+def _compute_dose_per_kg(row: dict) -> Optional[float]:
+    patient_weight = _parse_db_float(row.get("patient_weight"))
+    if patient_weight is None or patient_weight <= 0:
+        patient_weight = _parse_db_float(row.get("study_patient_weight"))
+    injected_activity = _parse_db_float(row.get("injected_activity"))
+    if patient_weight is None or patient_weight <= 0 or injected_activity is None:
+        return None
+    activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
+    return activity_mbq / patient_weight
+
+
+def _select_representative_series(rows: List[dict]) -> List[str]:
+    representatives = {}
+    for row in rows:
+        study_uid = row.get("study_instance_uid")
+        series_uid = row.get("series_instance_uid")
+        if not study_uid or not series_uid:
+            continue
+        delay_minutes = _compute_delay_minutes(row)
+        dose_per_kg = _compute_dose_per_kg(row)
+        score = 0
+        if dose_per_kg is not None:
+            score += 3
+        if delay_minutes is not None:
+            score += 2
+        if (row.get("modality") or "") in RADIOPHARM_MODALITIES:
+            score += 1
+        current = representatives.get(study_uid)
+        if current is None or score > current["score"]:
+            representatives[study_uid] = {
+                "score": score,
+                "series_instance_uid": series_uid,
+            }
+    return [entry["series_instance_uid"] for entry in representatives.values()]
+
+
+def prune_non_representative_series(conn: sqlite3.Connection) -> int:
+    cursor = conn.execute("""
+        WITH study_weights AS (
+            SELECT study_instance_uid, MAX(patient_weight) AS study_patient_weight
+            FROM dicom_metadata
+            GROUP BY study_instance_uid
+        )
+        SELECT m.series_instance_uid,
+               m.study_instance_uid,
+               m.modality,
+               m.injected_activity,
+               m.patient_weight,
+               m.injection_date,
+               m.injection_time,
+               m.acquisition_date,
+               m.acquisition_time,
+               m.study_date,
+               w.study_patient_weight
+        FROM dicom_metadata m
+        LEFT JOIN study_weights w ON m.study_instance_uid = w.study_instance_uid
+    """)
+    columns = [col[0] for col in cursor.description]
+    rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    if not rows:
+        return 0
+    keep_series = _select_representative_series(rows)
+    if not keep_series:
+        return 0
+
+    conn.execute("UPDATE dicom_metadata SET is_representative = 0")
+    chunk_size = 900
+    for i in range(0, len(keep_series), chunk_size):
+        chunk = keep_series[i:i + chunk_size]
+        placeholders = ",".join("?" for _ in chunk)
+        conn.execute(
+            f"UPDATE dicom_metadata SET is_representative = 1 WHERE series_instance_uid IN ({placeholders})",
+            chunk,
+        )
+    conn.execute("""
+        DELETE FROM private_tag
+        WHERE series_instance_uid NOT IN (
+            SELECT series_instance_uid FROM dicom_metadata WHERE is_representative = 1
+        )
+    """)
+    cursor = conn.execute("DELETE FROM dicom_metadata WHERE is_representative = 0")
+    return cursor.rowcount
 
 def process_single_scan(
     scan_dir: Path,
@@ -609,6 +771,17 @@ def process_directory(
         
         _vprint(f"   ✅ Added {processed} new files to database")
     
+    _vprint("\n   🧹 Pruning non-representative series...")
+    try:
+        pruned = prune_non_representative_series(conn)
+        conn.commit()
+        _vprint(f"   ✓ Removed {pruned} non-representative series")
+        _vprint("   🧹 Vacuuming database to reclaim space...")
+        conn.execute("VACUUM")
+        _vprint("   ✓ Vacuum complete")
+    except Exception as e:
+        _vprint(f"   ⚠ Warning: Could not prune non-representative series: {e}")
+
     conn.close()
     _vprint(f"\n   💾 Database saved to: {db_path}")
     

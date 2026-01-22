@@ -3,7 +3,7 @@
 Clean Web UI for DICOM Metadata Browser
 """
 
-from flask import Flask, render_template, request, jsonify, session, redirect, send_from_directory, Response
+from flask import Flask, render_template, request, jsonify, session, send_from_directory, Response
 import sqlite3
 import math
 from pathlib import Path
@@ -2058,8 +2058,6 @@ def dashboard():
                     ct_bucket["dlp"].append(row_dict["dlp"])
                 ct_bucket["count"] += 1
 
-        series_uptake_times = uptake_times
-        series_doses_per_kg = doses_per_kg
 
         
         # Calculate statistics
@@ -2572,26 +2570,9 @@ def dashboard():
             bin_width=5,
             max_bins=60
         )
-        uptake_series_histogram = create_histogram(
-            series_uptake_times,
-            min_val=0,
-            max_val=max_uptake,
-            precision=1,
-            bin_width=5,
-            max_bins=60
-        )
-
         max_dose = float(max(doses_per_kg)) if doses_per_kg else 10.0
         dose_histogram = create_histogram(
             doses_per_kg,
-            min_val=0,
-            max_val=max_dose,
-            precision=2,
-            bin_width=0.1,
-            max_bins=80
-        )
-        dose_series_histogram = create_histogram(
-            series_doses_per_kg,
             min_val=0,
             max_val=max_dose,
             precision=2,
@@ -2608,21 +2589,10 @@ def dashboard():
             'labels': list(dose_histogram['labels']),
             'values': [int(v) for v in dose_histogram['values']]
         }
-        uptake_series_histogram_clean = {
-            'labels': list(uptake_series_histogram['labels']),
-            'values': [int(v) for v in uptake_series_histogram['values']]
-        }
-        dose_series_histogram_clean = {
-            'labels': list(dose_series_histogram['labels']),
-            'values': [int(v) for v in dose_series_histogram['values']]
-        }
-        
         return render_template('dashboard.html', 
                              stats=stats,
                              uptake_histogram=uptake_histogram_clean,
                              dose_histogram=dose_histogram_clean,
-                             uptake_series_histogram=uptake_series_histogram_clean,
-                             dose_series_histogram=dose_series_histogram_clean,
                              completeness_stats=completeness_stats,
                              timing_stats=timing_stats,
                              dose_stats=dose_stats,

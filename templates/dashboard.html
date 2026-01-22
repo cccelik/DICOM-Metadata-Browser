@@ -53,12 +53,6 @@
             gap: 12px;
         }
 
-        .top-bar-copy {
-            display: flex;
-            flex-direction: column;
-            line-height: 1.2;
-        }
-
         .top-bar-copy span,
         .top-bar-copy strong {
             font-size: 16px;
@@ -287,6 +281,15 @@
             background: #2a62b8;
         }
 
+        body.dark .progress-link .progress-fill {
+            background: rgba(86, 173, 255, 0.25);
+            color: #cfe0ff;
+        }
+
+        body.dark .progress-link:hover .progress-fill {
+            background: rgba(86, 173, 255, 0.35);
+        }
+
         .container {
             max-width: 1400px;
             margin: 0 auto;
@@ -445,6 +448,21 @@
             font-weight: bold;
             font-size: 12px;
         }
+
+        .progress-link {
+            display: block;
+            height: 100%;
+            text-decoration: none;
+        }
+
+        .progress-link .progress-fill {
+            background: #e6f0ff;
+            color: #1f4b99;
+        }
+
+        .progress-link:hover .progress-fill {
+            background: #d6e7ff;
+        }
         
         .distribution-info {
             margin-top: 15px;
@@ -515,6 +533,102 @@
 
         body.dark .info-button {
             color: #9aa7b5;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 20, 27, 0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+            z-index: 1000;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-card {
+            background: #fff;
+            color: #2c3e50;
+            border-radius: 12px;
+            padding: 20px 22px;
+            max-width: 420px;
+            width: calc(100% - 32px);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-card h3 {
+            margin-bottom: 8px;
+            font-size: 18px;
+        }
+
+        .modal-card ul {
+            padding-left: 18px;
+            margin: 12px 0 16px;
+        }
+
+        .modal-card li {
+            margin-bottom: 6px;
+            font-size: 14px;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .modal-close {
+            border: none;
+            background: #1f4b99;
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .modal-secondary {
+            border: 1px solid #c9d6ea;
+            background: transparent;
+            color: #1f4b99;
+        }
+
+        .modal-input {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #d7dde4;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        body.dark .modal-card {
+            background: #141c26;
+            color: #e6edf3;
+        }
+
+        body.dark .modal-close {
+            background: #4e85e9;
+            color: #0b1320;
+        }
+
+        body.dark .modal-secondary {
+            border-color: #3a4a61;
+            color: #cfe0ff;
+        }
+
+        body.dark .modal-input {
+            background: #0f141b;
+            border-color: #2a3b52;
+            color: #e6edf3;
         }
 
         .databank-item {
@@ -925,7 +1039,7 @@
                     <div class="metric-value">{{ "%.0f"|format(percent) }}%</div>
                 </div>
                 <div class="progress-bar">
-                    <a href="/?db={{ db_name }}&lang={{ lang }}&missing={{ key }}" style="display:block; height:100%; text-decoration:none;">
+                    <a class="progress-link" href="/?db={{ db_name }}&lang={{ lang }}&missing={{ key }}">
                         <div class="progress-fill" style="width: {{ percent }}%">
                             {{ t.view_missing or 'View missing' }}
                         </div>
@@ -1194,6 +1308,41 @@
             </div>
         </div>
     </div>
+
+    <div id="qa-score-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-hidden="true">
+        <div class="modal-card">
+            <h3>{{ t.qa_score_distribution or 'QA Score Distribution' }}</h3>
+            <p>{{ t.qa_score_help or 'QA (Quality Assurance) score is 0-5 based on the representative series:' }}</p>
+            <ul>
+                <li>{{ t.patient_weight or 'Patient weight' }}: {{ t.present or 'present' }}</li>
+                <li>{{ t.injected_activity or 'Injected activity' }}: {{ t.present or 'present' }}</li>
+                <li>{{ t.uptake_time_adherence or 'Uptake time' }}: {{ t.ok_or_too_long or 'status ok or too_long' }}</li>
+                <li>{{ t.timing_integrity or 'Timing integrity' }}: {{ t.no_time_conflict or 'status ok and no time conflict' }}</li>
+                <li>{{ t.recon_consistency or 'CSA fingerprint' }}: {{ t.matches_majority or 'matches majority fingerprint' }}</li>
+            </ul>
+            <div class="modal-actions">
+                <button class="modal-close" type="button" onclick="closeQaScoreHelp()">
+                    {{ t.close or 'Close' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="create-db-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-hidden="true">
+        <div class="modal-card">
+            <h3>{{ t.create_databank or 'Create Databank' }}</h3>
+            <p>{{ t.create_databank_hint or 'Enter a name for the new databank.' }}</p>
+            <input id="create-db-name" class="modal-input" type="text" placeholder="{{ t.databank_name or 'Databank name' }}">
+            <div class="modal-actions">
+                <button class="modal-close modal-secondary" type="button" onclick="closeCreateDb()">
+                    {{ t.cancel or 'Cancel' }}
+                </button>
+                <button class="modal-close" type="button" onclick="submitCreateDb()">
+                    {{ t.create or 'Create' }}
+                </button>
+            </div>
+        </div>
+    </div>
     
     <script>
         const storedTheme = localStorage.getItem('theme') || 'light';
@@ -1256,15 +1405,21 @@
         }
 
         function showQaScoreHelp() {
-            const message = [
-                'QA score is 0-5 based on representative series:',
-                '1 point: patient weight present',
-                '1 point: injected activity present (radiopharm modalities only)',
-                '1 point: injection time present (radiopharm modalities only)',
-                '1 point: uptake time computed and valid',
-                '1 point: timing is consistent (no negative or extreme delay)'
-            ].join('\n');
-            alert(message);
+            const modal = document.getElementById('qa-score-modal');
+            if (!modal) {
+                return;
+            }
+            modal.classList.add('active');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeQaScoreHelp() {
+            const modal = document.getElementById('qa-score-modal');
+            if (!modal) {
+                return;
+            }
+            modal.classList.remove('active');
+            modal.setAttribute('aria-hidden', 'true');
         }
 
         function createBarChart(ctx, labels, values, options) {
@@ -1330,7 +1485,6 @@
         const uptakeCtx = document.getElementById('uptakeTimeChart').getContext('2d');
         const uptakeLabels = {{ uptake_histogram['labels']|tojson }};
         const uptakeValues = {{ uptake_histogram['values']|tojson }};
-        const maxUptakeValue = uptakeValues.length > 0 ? Math.max(...uptakeValues) : 0;
         new Chart(uptakeCtx, {
             type: 'bar',
             data: {
@@ -1435,7 +1589,6 @@
         const doseCtx = document.getElementById('doseChart').getContext('2d');
         const doseLabels = {{ dose_histogram['labels']|tojson }};
         const doseValues = {{ dose_histogram['values']|tojson }};
-        const maxDoseValue = doseValues.length > 0 ? Math.max(...doseValues) : 0;
         new Chart(doseCtx, {
             type: 'bar',
             data: {
@@ -1579,7 +1732,7 @@
         if (timingChartEl) {
             const timingLabels = [
                 '{{ t.negative_uptake or "Negative uptake times" }}',
-                '{{ t.uptake_too_long or "Uptake time > 240 min" }}',
+                '{{ (t.uptake_too_long or "Uptake time > 240 min")|safe }}',
                 '{{ t.time_parse_fail or "Timestamp parse failures" }}',
                 '{{ t.study_time_conflict or "Series time vs study time conflict" }}'
             ];
@@ -1599,7 +1752,7 @@
         const dosePlausibilityChartEl = document.getElementById('dosePlausibilityChart');
         if (dosePlausibilityChartEl) {
             const doseLabels = [
-                '{{ t.dose_outliers or "Outliers (>3σ)" }}',
+                '{{ (t.dose_outliers or "Outliers (>3σ)")|safe }}',
                 '{{ t.unit_mismatch or "Possible unit mismatch" }}',
                 '{{ t.missing_activity_has_weight or "Missing activity (weight present)" }}',
                 '{{ t.missing_weight_has_activity or "Missing weight (activity present)" }}'
@@ -1622,7 +1775,7 @@
             const compositionLabels = [
                 '{{ t.missing_ct or "Studies missing CT" }}',
                 '{{ t.missing_pt or "Studies missing PT" }}',
-                '{{ t.high_series_count or "Studies with >20 series" }}'
+                '{{ (t.high_series_count or "Studies with >20 series")|safe }}'
             ];
             const compositionValues = [
                 {{ study_comp_stats.missing_ct }},
@@ -1658,9 +1811,33 @@
         const topMenuButton = document.getElementById('top-dashboard-hamburger');
         const topMenu = document.getElementById('top-dashboard-menu');
         const themeToggleButton = document.getElementById('theme-toggle');
+        const qaScoreModal = document.getElementById('qa-score-modal');
+        const createDbModal = document.getElementById('create-db-modal');
 
         function createDatabank() {
-            const name = prompt('New databank name');
+            const modal = document.getElementById('create-db-modal');
+            const input = document.getElementById('create-db-name');
+            if (!modal || !input) {
+                return;
+            }
+            modal.classList.add('active');
+            modal.setAttribute('aria-hidden', 'false');
+            input.value = '';
+            setTimeout(() => input.focus(), 0);
+        }
+
+        function closeCreateDb() {
+            const modal = document.getElementById('create-db-modal');
+            if (!modal) {
+                return;
+            }
+            modal.classList.remove('active');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+
+        function submitCreateDb() {
+            const input = document.getElementById('create-db-name');
+            const name = input ? input.value.trim() : '';
             if (!name) {
                 return;
             }
@@ -1681,6 +1858,9 @@
             })
             .catch(error => {
                 alert(error.message || 'Failed to create databank.');
+            })
+            .finally(() => {
+                closeCreateDb();
             });
             if (topMenuButton && topMenu) {
                 topMenuButton.setAttribute('aria-expanded', 'false');
@@ -1737,6 +1917,22 @@
         }
 
         applyTheme(storedTheme);
+
+        if (qaScoreModal) {
+            qaScoreModal.addEventListener('click', (event) => {
+                if (event.target === qaScoreModal) {
+                    closeQaScoreHelp();
+                }
+            });
+        }
+
+        if (createDbModal) {
+            createDbModal.addEventListener('click', (event) => {
+                if (event.target === createDbModal) {
+                    closeCreateDb();
+                }
+            });
+        }
     </script>
 </body>
 </html>
