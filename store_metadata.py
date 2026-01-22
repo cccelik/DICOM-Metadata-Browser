@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     
     -- Series Information
     series_instance_uid TEXT UNIQUE,
+    sop_instance_uid TEXT,
     series_number INTEGER,
     series_date TEXT,
     series_time TEXT,
@@ -98,6 +99,13 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     ctp_subject_id TEXT,
     ctp_private_flag_raw TEXT,
     ctp_private_flag_int INTEGER,
+
+    -- Siemens CSA headers (decoded JSON)
+    csa_image_header_json TEXT,
+    csa_series_header_json TEXT,
+    csa_image_header_hash TEXT,
+    csa_series_header_hash TEXT,
+    private_payload_fingerprint TEXT,
     
     
     -- Timestamps
@@ -108,6 +116,7 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
 CREATE INDEX IF NOT EXISTS idx_patient_id ON dicom_metadata(patient_id);
 CREATE INDEX IF NOT EXISTS idx_study_uid ON dicom_metadata(study_instance_uid);
 CREATE INDEX IF NOT EXISTS idx_series_uid ON dicom_metadata(series_instance_uid);
+CREATE INDEX IF NOT EXISTS idx_sop_uid ON dicom_metadata(sop_instance_uid);
 CREATE INDEX IF NOT EXISTS idx_modality ON dicom_metadata(modality);
 CREATE INDEX IF NOT EXISTS idx_manufacturer ON dicom_metadata(manufacturer);
 
@@ -128,6 +137,33 @@ CREATE INDEX IF NOT EXISTS idx_manufacturer_modality ON dicom_metadata(manufactu
 --     patient_name, patient_id, study_description, 
 --     radiopharmaceutical, manufacturer, modality
 -- );
+
+CREATE TABLE IF NOT EXISTS private_tag (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sop_instance_uid TEXT,
+    series_instance_uid TEXT,
+    study_instance_uid TEXT,
+    file_path TEXT,
+    manufacturer TEXT,
+    modality TEXT,
+    group_hex TEXT,
+    element_hex TEXT,
+    creator TEXT,
+    vr TEXT,
+    value_text TEXT,
+    value_num REAL,
+    value_json TEXT,
+    value_hex TEXT,
+    byte_len INTEGER,
+    value_hash TEXT,
+    classification TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(series_instance_uid, group_hex, element_hex, creator, value_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_private_series ON private_tag(series_instance_uid);
+CREATE INDEX IF NOT EXISTS idx_private_creator ON private_tag(creator);
+CREATE INDEX IF NOT EXISTS idx_private_classification ON private_tag(classification);
 """
 
 
@@ -167,6 +203,12 @@ def init_database(db_path: str, optimize: bool = True):
         ("ctp_subject_id", "TEXT"),
         ("ctp_private_flag_raw", "TEXT"),
         ("ctp_private_flag_int", "INTEGER"),
+        ("csa_image_header_json", "TEXT"),
+        ("csa_series_header_json", "TEXT"),
+        ("csa_image_header_hash", "TEXT"),
+        ("csa_series_header_hash", "TEXT"),
+        ("private_payload_fingerprint", "TEXT"),
+        ("sop_instance_uid", "TEXT"),
         ("protocol_name", "TEXT"),
         ("patient_position", "TEXT"),
         ("scanning_sequence", "TEXT"),
@@ -227,6 +269,7 @@ def insert_metadata(conn: sqlite3.Connection, metadata: DICOMMetadata, file_path
         tuple: (inserted: bool, reason: str)
     """
     data = metadata.to_dict()
+    private_tags = data.pop("private_tags", [])
     data['file_path'] = file_path
     
     columns = ', '.join(data.keys())
@@ -244,6 +287,8 @@ def insert_metadata(conn: sqlite3.Connection, metadata: DICOMMetadata, file_path
             conn.commit()
         # Check if row was actually inserted
         if cursor.rowcount > 0:
+            if private_tags:
+                insert_private_tags(conn, metadata, file_path, private_tags, commit=commit)
             return True, "inserted"
         if skip_existing and metadata.series_instance_uid:
             return False, "series_exists"
@@ -273,6 +318,7 @@ def store_metadata_batch(db_path: str, metadata_list: List[DICOMMetadata], file_
     all_data = []
     for metadata, file_path in zip(metadata_list, file_paths):
         data = metadata.to_dict()
+        data.pop("private_tags", None)
         data['file_path'] = file_path
         
         all_data.append(data)
@@ -289,9 +335,71 @@ def store_metadata_batch(db_path: str, metadata_list: List[DICOMMetadata], file_
         batch = all_data[i:i + batch_size]
         values_list = [list(item.values()) for item in batch]
         conn.executemany(query, values_list)
+        # Insert private tags after base metadata to avoid FK/order issues.
+        for metadata, file_path in zip(metadata_list[i:i + batch_size], file_paths[i:i + batch_size]):
+            if metadata.private_tags:
+                insert_private_tags(conn, metadata, file_path, metadata.private_tags, commit=False)
         conn.commit()
     
     conn.close()
+
+
+def insert_private_tags(
+    conn: sqlite3.Connection,
+    metadata: DICOMMetadata,
+    file_path: str,
+    private_tags: List[dict],
+    commit: bool = True
+):
+    if not private_tags:
+        return
+    values = []
+    for tag in private_tags:
+        values.append((
+            tag.get("sop_instance_uid"),
+            metadata.series_instance_uid,
+            metadata.study_instance_uid,
+            file_path,
+            metadata.manufacturer,
+            metadata.modality,
+            tag.get("group_hex"),
+            tag.get("element_hex"),
+            tag.get("creator"),
+            tag.get("vr"),
+            tag.get("value_text"),
+            tag.get("value_num"),
+            tag.get("value_json"),
+            tag.get("value_hex"),
+            tag.get("byte_len"),
+            tag.get("value_hash"),
+            tag.get("classification"),
+        ))
+    conn.executemany(
+        """
+        INSERT OR IGNORE INTO private_tag (
+            sop_instance_uid,
+            series_instance_uid,
+            study_instance_uid,
+            file_path,
+            manufacturer,
+            modality,
+            group_hex,
+            element_hex,
+            creator,
+            vr,
+            value_text,
+            value_num,
+            value_json,
+            value_hex,
+            byte_len,
+            value_hash,
+            classification
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        values
+    )
+    if commit:
+        conn.commit()
 
 
 def get_all_metadata(db_path: str) -> List[dict]:

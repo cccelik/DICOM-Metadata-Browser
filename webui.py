@@ -14,6 +14,7 @@ import shutil
 import csv
 import io
 import re
+import xml.etree.ElementTree as ET
 from difflib import SequenceMatcher
 from typing import Optional, List
 from process_dicom import process_directory
@@ -466,7 +467,7 @@ def get_db_connection(db_path=None):
     """Get database connection"""
     if db_path is None:
         db_path = DEFAULT_DB
-    conn = sqlite3.connect(db_path)
+    conn = init_database(db_path, optimize=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -1043,7 +1044,11 @@ def study_detail(study_uid):
                 MAX(ctp_collection) as ctp_collection,
                 MAX(ctp_subject_id) as ctp_subject_id,
                 MAX(ctp_private_flag_raw) as ctp_private_flag_raw,
-                MAX(ctp_private_flag_int) as ctp_private_flag_int
+                MAX(ctp_private_flag_int) as ctp_private_flag_int,
+                MAX(csa_image_header_json) as csa_image_header_json,
+                MAX(csa_series_header_json) as csa_series_header_json,
+                MAX(csa_image_header_hash) as csa_image_header_hash,
+                MAX(csa_series_header_hash) as csa_series_header_hash
             FROM dicom_metadata
             WHERE study_instance_uid = ?
             GROUP BY study_instance_uid
@@ -1111,6 +1116,11 @@ def study_detail(study_uid):
                 manufacturer_model_name,
                 software_version,
                 station_name,
+                csa_image_header_json,
+                csa_series_header_json,
+                csa_image_header_hash,
+                csa_series_header_hash,
+                private_payload_fingerprint,
                 image_orientation_patient,
                 slice_location,
                 number_of_frames,
@@ -1125,6 +1135,77 @@ def study_detail(study_uid):
         export_modalities = sorted({
             s.get('modality') for s in series if s.get('modality')
         })
+        series_uids = [s.get("series_instance_uid") for s in series if s.get("series_instance_uid")]
+        private_creators = {}
+        pipeline_tags = {}
+        rt_tags = {}
+        if series_uids:
+            placeholders = ",".join(["?"] * len(series_uids))
+            cursor = conn.execute(
+                f"""
+                SELECT series_instance_uid, creator, COUNT(*) as tag_count
+                FROM private_tag
+                WHERE series_instance_uid IN ({placeholders})
+                GROUP BY series_instance_uid, creator
+                """,
+                series_uids,
+            )
+            for row in cursor.fetchall():
+                private_creators.setdefault(row["series_instance_uid"], {})[row["creator"]] = row["tag_count"]
+
+            cursor = conn.execute(
+                f"""
+                SELECT series_instance_uid, creator, group_hex, element_hex, value_text, value_num, value_hex
+                FROM private_tag
+                WHERE series_instance_uid IN ({placeholders})
+                  AND classification = 'pipeline_provenance'
+                ORDER BY series_instance_uid, creator, group_hex, element_hex
+                """,
+                series_uids,
+            )
+            for row in cursor.fetchall():
+                item = dict(row)
+                raw_value = item.get("value_text")
+                if raw_value is None and item.get("value_num") is not None:
+                    raw_value = str(item["value_num"])
+                formatted = format_private_timestamp(raw_value) if raw_value else None
+                item["display_value"] = formatted or raw_value or item.get("value_hex")
+                pipeline_tags.setdefault(item["series_instance_uid"], []).append(item)
+
+            cursor = conn.execute(
+                f"""
+                SELECT series_instance_uid, creator, group_hex, element_hex, value_text, value_num, value_hex
+                FROM private_tag
+                WHERE series_instance_uid IN ({placeholders})
+                  AND classification = 'rt_provenance'
+                ORDER BY series_instance_uid, creator, group_hex, element_hex
+                """,
+                series_uids,
+            )
+            for row in cursor.fetchall():
+                item = dict(row)
+                raw_value = item.get("value_text")
+                if raw_value is None and item.get("value_num") is not None:
+                    raw_value = str(item["value_num"])
+                formatted = format_private_timestamp(raw_value) if raw_value else None
+                item["display_value"] = formatted or raw_value or item.get("value_hex")
+                rt_tags.setdefault(item["series_instance_uid"], []).append(item)
+
+            cursor = conn.execute(
+                f"""
+                SELECT series_instance_uid, value_text
+                FROM private_tag
+                WHERE series_instance_uid IN ({placeholders})
+                  AND creator = 'SIEMENS CSA HEADER'
+                  AND value_text LIKE '%<PetDoseReportData%'
+                """,
+                series_uids,
+            )
+            pet_dose_reports = {}
+            for row in cursor.fetchall():
+                entries = parse_pet_dose_report(row["value_text"])
+                if entries:
+                    pet_dose_reports[row["series_instance_uid"]] = entries
         
         conn.close()
         
@@ -1164,6 +1245,11 @@ def study_detail(study_uid):
                 study_info['height_cm'] = height_m * 100  # Convert to cm for display
         
         for s in series:
+            creator_counts = private_creators.get(s.get("series_instance_uid"), {})
+            s["private_creators"] = dict(sorted(creator_counts.items(), key=lambda x: x[1], reverse=True))
+            s["pipeline_provenance"] = pipeline_tags.get(s.get("series_instance_uid"), [])
+            s["rt_provenance"] = rt_tags.get(s.get("series_instance_uid"), [])
+            s["pet_dose_report"] = pet_dose_reports.get(s.get("series_instance_uid"))
             if s.get('series_date'):
                 s['series_date_formatted'] = format_date(s['series_date'])
             if s.get('series_time'):
@@ -2094,6 +2180,69 @@ def format_time(time_str):
         return time_str
     except Exception:
         return time_str
+
+
+def format_private_timestamp(value_text: Optional[object]) -> Optional[str]:
+    """Best-effort formatting for private-tag timestamps."""
+    if value_text is None:
+        return None
+    text = str(value_text).strip()
+    if not text:
+        return None
+    try:
+        if re.fullmatch(r"\d{8}", text):
+            return format_date(text)
+        if re.fullmatch(r"\d{14}(\.\d+)?", text):
+            date_part = text[:8]
+            time_part = text[8:]
+            return f"{format_date(date_part)} {format_time(time_part)}"
+        if re.fullmatch(r"\d{6}(\.\d+)?", text):
+            return format_time(text)
+        if re.fullmatch(r"\d{2}:\d{2}:\d{2}(\.\d+)?", text):
+            parts = text.split(".", 1)
+            base = parts[0]
+            if len(parts) > 1 and parts[1]:
+                return f"{base}.{parts[1][:1]}"
+            return base
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?", text):
+            from datetime import datetime
+            cleaned = text.replace("T", " ")
+            fmt = "%Y-%m-%d %H:%M:%S.%f" if "." in cleaned else "%Y-%m-%d %H:%M:%S"
+            return datetime.strptime(cleaned, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}:\d{2}(\s*[AP]M)?", text):
+            from datetime import datetime
+            for fmt in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S"):
+                try:
+                    return datetime.strptime(text, fmt).strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    continue
+    except Exception:
+        return text
+    return text
+
+
+def parse_pet_dose_report(xml_text: str) -> Optional[List[dict]]:
+    if not xml_text:
+        return None
+    try:
+        root = ET.fromstring(xml_text)
+    except Exception:
+        return None
+    names = [n.text for n in root.findall(".//m_StatisticsNameVector") if n.text]
+    values1 = [v.text for v in root.findall(".//m_StatisticsValueVector1")]
+    values2 = [v.text for v in root.findall(".//m_StatisticsValueVector2")]
+    entries = []
+    for idx, name in enumerate(names):
+        val1 = values1[idx] if idx < len(values1) else None
+        val2 = values2[idx] if idx < len(values2) else None
+        if val1 is None and val2 is None:
+            continue
+        entries.append({
+            "name": name,
+            "value": val1,
+            "alt_value": val2
+        })
+    return entries or None
 
 
 def parse_time_to_24hour(time_str):

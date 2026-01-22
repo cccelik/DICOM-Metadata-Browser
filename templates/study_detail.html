@@ -347,6 +347,10 @@
             background: #f8f9fa;
         }
 
+        .detail-table {
+            margin-bottom: 12px;
+        }
+
         .detail-table th {
             width: 220px;
             color: #2c3e50;
@@ -358,6 +362,10 @@
             margin-bottom: 15px;
             padding-bottom: 15px;
             border-bottom: 1px solid #dee2e6;
+        }
+
+        .detail-panel-section:not(:first-of-type) {
+            margin-top: 18px;
         }
 
         .detail-panel-divider {
@@ -372,6 +380,19 @@
         .detail-panel-title {
             color: #2c3e50;
             font-size: 14px;
+        }
+
+        .detail-panel-subsection {
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px dashed #dee2e6;
+        }
+
+        .detail-panel-subtitle {
+            color: #5b6b7b;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
 
         body.dark {
@@ -494,6 +515,14 @@
 
         body.dark .detail-panel-title {
             color: #e6edf3;
+        }
+
+        body.dark .detail-panel-subsection {
+            border-top-color: #243244;
+        }
+
+        body.dark .detail-panel-subtitle {
+            color: #9aa7b5;
         }
 
         body.dark .detail-panel strong {
@@ -1008,9 +1037,11 @@
             </table>
         </div>
 
-        {% if study_info.ctp_collection or study_info.ctp_subject_id or study_info.ctp_private_flag_raw or study_info.ctp_private_flag_int %}
+        {% if study_info.ctp_collection or study_info.ctp_subject_id or study_info.ctp_private_flag_raw or study_info.ctp_private_flag_int or study_info.csa_image_header_json or study_info.csa_series_header_json %}
         <div class="info-section">
-            <h2>{{ t.ctp_private_metadata }}</h2>
+            <h2>{{ t.private_tags or 'Private Tags' }}</h2>
+            {% if study_info.ctp_collection or study_info.ctp_subject_id or study_info.ctp_private_flag_raw or study_info.ctp_private_flag_int %}
+            <h3 style="margin: 18px 0 10px; font-size: 16px; color: #2c3e50;">{{ t.ctp_private_metadata }}</h3>
             <table class="info-table">
                 {% if study_info.ctp_collection %}
                 <tr>
@@ -1037,6 +1068,32 @@
                 </tr>
                 {% endif %}
             </table>
+            {% endif %}
+            {% if study_info.csa_image_header_json or study_info.csa_series_header_json %}
+            <h3 style="margin: 18px 0 10px; font-size: 16px; color: #2c3e50;">{{ t.csa_private_metadata or 'Siemens CSA' }}</h3>
+            <table class="info-table">
+                {% if study_info.csa_image_header_json or study_info.csa_image_header_hash %}
+                <tr>
+                    <th>{{ t.csa_image_header or 'CSA Image Header' }}</th>
+                    <td class="info-value">
+                        <div class="csa-summary"
+                             data-csa='{{ study_info.csa_image_header_json|e }}'
+                             data-hash="{{ study_info.csa_image_header_hash or '' }}"></div>
+                    </td>
+                </tr>
+                {% endif %}
+                {% if study_info.csa_series_header_json or study_info.csa_series_header_hash %}
+                <tr>
+                    <th>{{ t.csa_series_header or 'CSA Series Header' }}</th>
+                    <td class="info-value">
+                        <div class="csa-summary"
+                             data-csa='{{ study_info.csa_series_header_json|e }}'
+                             data-hash="{{ study_info.csa_series_header_hash or '' }}"></div>
+                    </td>
+                </tr>
+                {% endif %}
+            </table>
+            {% endif %}
         </div>
         {% endif %}
         
@@ -1150,6 +1207,208 @@
                         <tr id="series-{{ loop.index }}" style="display: none;">
                             <td colspan="8">
                                 <div class="detail-panel">
+                                    {% set has_nm = s.radiopharmaceutical or s.injected_activity or s.decay_correction or s.activity_at_scan or s.activity_per_kg or s.radiopharmaceutical_volume or s.radionuclide_total_dose or s.pet_dose_report %}
+                                    {% set has_private_details = s.csa_image_header_json or s.csa_series_header_json or s.csa_image_header_hash or s.csa_series_header_hash or s.private_payload_fingerprint or (s.private_creators and s.private_creators|length) or (s.pipeline_provenance and s.pipeline_provenance|length) or (s.rt_provenance and s.rt_provenance|length) %}
+                                    {% if has_nm or has_private_details %}
+                                    {% if has_nm %}
+                                    <div class="detail-panel-section">
+                                        <strong class="detail-panel-title">{{ t.nuclear_medicine_information }}</strong>
+                                    </div>
+                                    <table class="detail-table">
+                                        {% if s.radiopharmaceutical %}
+                                        <tr>
+                                            <th>{{ t.radiopharmaceutical }}</th>
+                                            <td>{{ s.radiopharmaceutical }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.injected_activity %}
+                                        {% if s.injected_activity > 1e6 %}
+                                        <tr>
+                                            <th>{{ t.injected_activity }}</th>
+                                            <td>{{ "%.2f"|format(s.injected_activity / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.injected_activity) }} Bq)</span></td>
+                                        </tr>
+                                        {% else %}
+                                        <tr>
+                                            <th>{{ t.injected_activity }}</th>
+                                            <td>{{ "%.2f"|format(s.injected_activity) }} MBq</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% endif %}
+                                        {% if s.injection_time_formatted or s.injection_time %}
+                                        <tr>
+                                            <th>{{ t.injection_time }}</th>
+                                            <td>{{ s.injection_time_formatted or s.injection_time }}{% if s.injection_date_formatted %} ({{ s.injection_date_formatted }}){% endif %}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.half_life %}
+                                        <tr>
+                                            <th>{{ t.half_life }}</th>
+                                            <td>{{ "%.2f"|format(s.half_life) }} s
+                                        {% if s.half_life > 60 %}
+                                            <span style="color: #7f8c8d; font-size: 12px;">({{ "%.1f"|format(s.half_life / 60) }} min)</span>
+                                        {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.decay_correction %}
+                                        <tr>
+                                            <th>{{ t.decay_correction }}</th>
+                                            <td>{{ s.decay_correction }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.radiopharmaceutical_volume %}
+                                        <tr>
+                                            <th>{{ t.radiopharmaceutical_volume }}</th>
+                                            <td>{{ "%.2f"|format(s.radiopharmaceutical_volume) }} ml</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.radionuclide_total_dose and s.radionuclide_total_dose != s.injected_activity %}
+                                        {% if s.radionuclide_total_dose > 1e6 %}
+                                        <tr>
+                                            <th>{{ t.radionuclide_total_dose }}</th>
+                                            <td>{{ "%.2f"|format(s.radionuclide_total_dose / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.radionuclide_total_dose) }} Bq)</span></td>
+                                        </tr>
+                                        {% else %}
+                                        <tr>
+                                            <th>{{ t.radionuclide_total_dose }}</th>
+                                            <td>{{ "%.2f"|format(s.radionuclide_total_dose) }} MBq</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% endif %}
+                                        {% if s.activity_at_scan %}
+                                        {% if s.activity_at_scan > 1e6 %}
+                                        <tr>
+                                            <th>{{ t.activity_at_scan }}</th>
+                                            <td>{{ "%.2f"|format(s.activity_at_scan / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.activity_at_scan) }} Bq)</span>
+                                        {% else %}
+                                        <tr>
+                                            <th>{{ t.activity_at_scan }}</th>
+                                            <td>{{ "%.2f"|format(s.activity_at_scan / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.activity_at_scan) }} Bq)</span>
+                                        {% endif %}
+                                        {% if s.decay_percent %}
+                                            <span style="color: #7f8c8d; font-size: 12px;">({{ "%.1f"|format(s.decay_percent) }}% {{ t.decayed }})</span>
+                                        {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.activity_per_kg %}
+                                        {% if s.activity_per_kg > 1e6 %}
+                                        <tr>
+                                            <th>{{ t.activity_per_kg }}</th>
+                                            <td>{{ "%.2f"|format(s.activity_per_kg / 1e6) }} MBq/kg <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.activity_per_kg) }} Bq/kg)</span></td>
+                                        </tr>
+                                        {% else %}
+                                        <tr>
+                                            <th>{{ t.activity_per_kg }}</th>
+                                            <td>{{ "%.2f"|format(s.activity_per_kg) }} MBq/kg</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% endif %}
+                                        {% if s.pet_dose_report %}
+                                        <tr>
+                                            <th>{{ t.pet_dose_report_private or 'PET Dose Report (Private)' }}</th>
+                                            <td>
+                                                {% for entry in s.pet_dose_report %}
+                                                    <div>
+                                                        <strong>{{ entry.name }}:</strong>
+                                                        {{ entry.value or '—' }}
+                                                        {% if entry.alt_value and entry.alt_value != '-1' %}
+                                                            <span style="color: #7f8c8d; font-size: 12px;">({{ entry.alt_value }})</span>
+                                                        {% endif %}
+                                                    </div>
+                                                {% endfor %}
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                    </table>
+                                    {% endif %}
+
+                                    {% if has_private_details %}
+                                    <div class="detail-panel-section">
+                                        <strong class="detail-panel-title">{{ t.private_tags or 'Private Tags' }}</strong>
+                                    </div>
+                                    <table class="detail-table">
+                                        {% if s.private_payload_fingerprint %}
+                                        <tr>
+                                            <th>{{ t.private_payload_fingerprint or 'Private Payload Fingerprint' }}</th>
+                                            <td>{{ s.private_payload_fingerprint }}</td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.private_creators and s.private_creators|length %}
+                                        <tr>
+                                            <th>{{ t.private_creators or 'Private Creators' }}</th>
+                                            <td>
+                                                {% for creator, count in s.private_creators.items() %}
+                                                    <div>{{ creator }} ({{ count }})</div>
+                                                {% endfor %}
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.protocol_name or s.radiopharmaceutical or s.injection_time or s.acquisition_time or s.acquisition_type or s.reconstruction_algorithm or s.convolution_kernel %}
+                                        <tr>
+                                            <th>{{ t.protocol_context or 'Protocol Context' }}</th>
+                                            <td>
+                                                {% if s.protocol_name %}<div><strong>{{ t.protocol_name or 'Protocol Name' }}:</strong> {{ s.protocol_name }}</div>{% endif %}
+                                                {% if s.radiopharmaceutical %}<div><strong>{{ t.radiopharmaceutical }}:</strong> {{ s.radiopharmaceutical }}</div>{% endif %}
+                                                {% if s.injection_time %}<div><strong>{{ t.injection_time }}:</strong> {{ s.injection_time_formatted or s.injection_time }}</div>{% endif %}
+                                                {% if s.acquisition_time %}<div><strong>{{ t.acquisition_time or 'Acquisition Time' }}:</strong> {{ s.acquisition_time_formatted or s.acquisition_time }}</div>{% endif %}
+                                                {% if s.acquisition_type %}<div><strong>{{ t.acquisition_type or 'Acquisition Type' }}:</strong> {{ s.acquisition_type }}</div>{% endif %}
+                                                {% if s.reconstruction_algorithm %}<div><strong>{{ t.reconstruction_algorithm or 'Reconstruction Algorithm' }}:</strong> {{ s.reconstruction_algorithm }}</div>{% endif %}
+                                                {% if s.convolution_kernel %}<div><strong>{{ t.convolution_kernel or 'Convolution Kernel' }}:</strong> {{ s.convolution_kernel }}</div>{% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.csa_image_header_json or s.csa_image_header_hash %}
+                                        <tr>
+                                            <th>{{ t.csa_image_header or 'CSA Image Header' }}</th>
+                                            <td>
+                                                <div class="csa-summary"
+                                                     data-csa='{{ s.csa_image_header_json|e }}'
+                                                     data-hash="{{ s.csa_image_header_hash or '' }}"></div>
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.csa_series_header_json or s.csa_series_header_hash %}
+                                        <tr>
+                                            <th>{{ t.csa_series_header or 'CSA Series Header' }}</th>
+                                            <td>
+                                                <div class="csa-summary"
+                                                     data-csa='{{ s.csa_series_header_json|e }}'
+                                                     data-hash="{{ s.csa_series_header_hash or '' }}"></div>
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.pipeline_provenance and s.pipeline_provenance|length %}
+                                        <tr>
+                                            <th>{{ t.derived_provenance or 'Derived Provenance' }}</th>
+                                            <td>
+                                                {% for tag in s.pipeline_provenance %}
+                                                    <div>
+                                                        {{ tag.creator }} ({{ tag.group_hex }},{{ tag.element_hex }}):
+                                                        {{ tag.display_value or tag.value_text or tag.value_num or tag.value_hex or '—' }}
+                                                    </div>
+                                                {% endfor %}
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                        {% if s.rt_provenance and s.rt_provenance|length %}
+                                        <tr>
+                                            <th>{{ t.rt_provenance or 'RT Provenance' }}</th>
+                                            <td>
+                                                {% for tag in s.rt_provenance %}
+                                                    <div>
+                                                        {{ tag.creator }} ({{ tag.group_hex }},{{ tag.element_hex }}):
+                                                        {{ tag.display_value or tag.value_text or tag.value_num or tag.value_hex or '—' }}
+                                                    </div>
+                                                {% endfor %}
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                    </table>
+                                    {% endif %}
+
+                                    {% endif %}
+
                                     <div class="detail-panel-section">
                                         <strong class="detail-panel-title">{{ t.series_information }}</strong>
                                     </div>
@@ -1359,114 +1618,6 @@
                                     </table>
                                     {% endif %}
                                     
-                                    {% if s.radiopharmaceutical or s.injected_activity or s.decay_correction %}
-                                    <div class="detail-panel-divider">
-                                        <strong class="detail-panel-title">{{ t.nuclear_medicine_information }}</strong>
-                                    </div>
-                                    <table class="detail-table">
-                                    {% if s.radiopharmaceutical %}
-                                    <tr>
-                                        <th>{{ t.radiopharmaceutical }}</th>
-                                        <td>{{ s.radiopharmaceutical }}</td>
-                                    </tr>
-                                    {% endif %}
-                                    {% if s.injected_activity %}
-                                    {# DICOM standard: RadionuclideTotalDose (0018,1074) is in MBq #}
-                                    {# Check if value is likely in Bq (>1e6) or MBq (<1e6) #}
-                                    {% if s.injected_activity > 1e6 %}
-                                        {# Value is in Bq, convert to MBq for display #}
-                                        <tr>
-                                            <th>{{ t.injected_activity }}</th>
-                                            <td>{{ "%.2f"|format(s.injected_activity / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.injected_activity) }} Bq)</span></td>
-                                        </tr>
-                                    {% else %}
-                                        {# Value is likely in MBq (DICOM standard) #}
-                                        <tr>
-                                            <th>{{ t.injected_activity }}</th>
-                                            <td>{{ "%.2f"|format(s.injected_activity) }} MBq</td>
-                                        </tr>
-                                    {% endif %}
-                                    {% endif %}
-                                    {% if s.injection_time_formatted or s.injection_time %}
-                                    <tr>
-                                        <th>{{ t.injection_time }}</th>
-                                        <td>{{ s.injection_time_formatted or s.injection_time }}{% if s.injection_date_formatted %} ({{ s.injection_date_formatted }}){% endif %}</td>
-                                    </tr>
-                                    {% endif %}
-                                    {% if s.half_life %}
-                                    <tr>
-                                        <th>{{ t.half_life }}</th>
-                                        <td>{{ "%.2f"|format(s.half_life) }} s
-                                    {% if s.half_life > 60 %}
-                                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.1f"|format(s.half_life / 60) }} min)</span>
-                                    {% endif %}
-                                        </td>
-                                    </tr>
-                                    {% endif %}
-                                    {% if s.decay_correction %}
-                                    <tr>
-                                        <th>{{ t.decay_correction }}</th>
-                                        <td>{{ s.decay_correction }}</td>
-                                    </tr>
-                                    {% endif %}
-                                    {% if s.radiopharmaceutical_volume %}
-                                    <tr>
-                                        <th>{{ t.radiopharmaceutical_volume }}</th>
-                                        <td>{{ "%.2f"|format(s.radiopharmaceutical_volume) }} ml</td>
-                                    </tr>
-                                    {% endif %}
-                                    {% if s.radionuclide_total_dose and s.radionuclide_total_dose != s.injected_activity %}
-                                    {# DICOM standard: RadionuclideTotalDose (0018,1074) is in MBq #}
-                                    {% if s.radionuclide_total_dose > 1e6 %}
-                                        {# Value is in Bq, convert to MBq for display #}
-                                        <tr>
-                                            <th>{{ t.radionuclide_total_dose }}</th>
-                                            <td>{{ "%.2f"|format(s.radionuclide_total_dose / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.radionuclide_total_dose) }} Bq)</span></td>
-                                        </tr>
-                                    {% else %}
-                                        {# Value is likely in MBq (DICOM standard) #}
-                                        <tr>
-                                            <th>{{ t.radionuclide_total_dose }}</th>
-                                            <td>{{ "%.2f"|format(s.radionuclide_total_dose) }} MBq</td>
-                                        </tr>
-                                    {% endif %}
-                                    {% endif %}
-                                    {% if s.activity_at_scan %}
-                                    {# Activity at scan is calculated in Bq, but display in MBq for consistency with DICOM standards #}
-                                    {% if s.activity_at_scan > 1e6 %}
-                                        <tr>
-                                            <th>{{ t.activity_at_scan }}</th>
-                                            <td>{{ "%.2f"|format(s.activity_at_scan / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.activity_at_scan) }} Bq)</span>
-                                    {% else %}
-                                        {# Very small values, show in MBq with Bq in parentheses #}
-                                        <tr>
-                                            <th>{{ t.activity_at_scan }}</th>
-                                            <td>{{ "%.2f"|format(s.activity_at_scan / 1e6) }} MBq <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.activity_at_scan) }} Bq)</span>
-                                    {% endif %}
-                                    {% if s.decay_percent %}
-                                        <span style="color: #7f8c8d; font-size: 12px;">({{ "%.1f"|format(s.decay_percent) }}% {{ t.decayed }})</span>
-                                    {% endif %}
-                                            </td>
-                                        </tr>
-                                    {% endif %}
-                                    {% if s.activity_per_kg %}
-                                    {# Activity per kg: convert to MBq/kg for display #}
-                                    {% if s.activity_per_kg > 1e6 %}
-                                        <tr>
-                                            <th>{{ t.activity_per_kg }}</th>
-                                            <td>{{ "%.2f"|format(s.activity_per_kg / 1e6) }} MBq/kg <span style="color: #7f8c8d; font-size: 12px;">({{ "%.0f"|format(s.activity_per_kg) }} Bq/kg)</span></td>
-                                        </tr>
-                                    {% else %}
-                                        {# Value is likely already in MBq/kg #}
-                                        <tr>
-                                            <th>{{ t.activity_per_kg }}</th>
-                                            <td>{{ "%.2f"|format(s.activity_per_kg) }} MBq/kg</td>
-                                        </tr>
-                                    {% endif %}
-                                    {% endif %}
-                                    </table>
-                                    {% endif %}
-
                                 </div>
                             </td>
                         </tr>
@@ -1597,6 +1748,67 @@
         const exportModalities = Array.from(document.querySelectorAll('.export-modality-toggle'));
         const exportModalitySelectAll = document.getElementById('export-modalities-all');
         const exportModalitySelectNone = document.getElementById('export-modalities-none');
+
+        function summarizeCsaBlock(block) {
+            const raw = block.getAttribute('data-csa');
+            const hash = block.getAttribute('data-hash') || '';
+            try {
+                const parsed = raw ? JSON.parse(raw) : null;
+                const elements = parsed && parsed.elements ? parsed.elements : {};
+                const keys = Object.keys(elements);
+                const elementCount = parsed && parsed.element_count ? parsed.element_count : keys.length;
+                const asciiKeys = keys.filter((key) => /^[\\x20-\\x7E]+$/.test(key));
+                const selected = [];
+                for (const key of asciiKeys) {
+                    const payload = elements[key];
+                    const values = payload && payload.values ? payload.values : [];
+                    if (values.length) {
+                        selected.push(`${key}: ${values.slice(0, 2).join(', ')}`);
+                    }
+                    if (selected.length >= 8) {
+                        break;
+                    }
+                }
+                const keyPreview = keys.slice(0, 20).join(', ');
+                const moreKeys = keys.length > 20 ? ` +${keys.length - 20}` : '';
+
+                const table = document.createElement('table');
+                table.style.width = '100%';
+                table.style.borderCollapse = 'collapse';
+
+                const rows = [
+                    ['{{ t.element_count or "Element Count" }}', elementCount || '0'],
+                    ['{{ t.key_list or "Key List" }}', keyPreview ? `${keyPreview}${moreKeys}` : '—'],
+                    ['{{ t.protocol_fingerprint or "Protocol Fingerprint" }}', hash || '—'],
+                    ['{{ t.ascii_keys or "Selected ASCII Keys" }}', selected.length ? selected.join('; ') : '—'],
+                ];
+
+                rows.forEach(([label, value]) => {
+                    const tr = document.createElement('tr');
+                    const th = document.createElement('th');
+                    th.textContent = label;
+                    th.style.textAlign = 'left';
+                    th.style.padding = '4px 6px';
+                    th.style.verticalAlign = 'top';
+                    const td = document.createElement('td');
+                    td.textContent = value;
+                    td.style.padding = '4px 6px';
+                    tr.appendChild(th);
+                    tr.appendChild(td);
+                    table.appendChild(tr);
+                });
+
+                block.appendChild(table);
+            } catch (err) {
+                if (hash) {
+                    block.textContent = `{{ t.protocol_fingerprint or "Protocol Fingerprint" }}: ${hash}`;
+                } else {
+                    block.textContent = raw || '{{ t.no_data or "No data" }}';
+                }
+            }
+        }
+
+        document.querySelectorAll('.csa-summary').forEach(summarizeCsaBlock);
 
         function createDatabank() {
             const name = prompt('New databank name');

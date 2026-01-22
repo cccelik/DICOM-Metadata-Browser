@@ -6,6 +6,7 @@ Also supports ZIP and 7Z archive files
 """
 
 import argparse
+import warnings
 import itertools
 import os
 import tempfile
@@ -16,6 +17,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from extract_metadata import extract_metadata_from_paths
 from store_metadata import init_database
+warnings.filterwarnings(
+    "ignore",
+    message="Invalid value for VR UI"
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATABANK_DIR = BASE_DIR / "Databanks"
