@@ -386,6 +386,10 @@
             margin-top: 20px;
         }
 
+        .chart-container.compact {
+            height: 220px;
+        }
+
         
         .protocol-adherence {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -485,6 +489,32 @@
         .badge-primary {
             background: #3498db;
             color: white;
+        }
+
+        .card-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .info-button {
+            border: none;
+            background: transparent;
+            color: #5c6b84;
+            cursor: pointer;
+            padding: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .info-button i {
+            font-size: 18px;
+        }
+
+        body.dark .info-button {
+            color: #9aa7b5;
         }
 
         .databank-item {
@@ -859,6 +889,310 @@
                 </table>
             </div>
         </div>
+
+        <!-- QA Dashboard -->
+        <div class="dashboard-grid">
+            <div class="card">
+                <h2>{{ t.metadata_completeness or 'Metadata Completeness' }}</h2>
+                {% set total_series = completeness_stats.total %}
+                {% set counts = completeness_stats.counts %}
+                {% set totals = completeness_stats.totals if completeness_stats.totals else {} %}
+                <div class="distribution-info">
+                    <strong>{{ t.total_studies or 'Total studies' }}:</strong> {{ total_series }}
+                </div>
+                <div class="chart-container compact">
+                    <canvas id="completenessChart"></canvas>
+                </div>
+                {% for key, label in [
+                    ('weight', t.patient_weight or 'Weight'),
+                    ('dose', t.injected_activity or 'Injected Activity'),
+                    ('injection_time', t.injection_time or 'Injection Time'),
+                    ('acquisition_time', t.acquisition_time or 'Acquisition Time'),
+                    ('radiopharmaceutical', t.radiopharmaceutical or 'Radiopharmaceutical'),
+                    ('patient_sex', t.patient_sex or 'Patient Sex'),
+                    ('patient_age', t.patient_age or 'Patient Age')
+                ] %}
+                {% set count = counts[key] if counts and key in counts else 0 %}
+                {% set denom = totals[key] if totals and key in totals else total_series %}
+                {% set percent = (count / denom * 100) if denom else 0 %}
+                <div class="adherence-metric">
+                    <div>
+                        <div class="metric-label">{{ label }}</div>
+                        <div style="font-size: 14px; opacity: 0.9; margin-top: 5px;">
+                            {{ count }} / {{ denom }} ({{ "%.1f"|format(percent) }}%)
+                        </div>
+                    </div>
+                    <div class="metric-value">{{ "%.0f"|format(percent) }}%</div>
+                </div>
+                <div class="progress-bar">
+                    <a href="/?db={{ db_name }}&lang={{ lang }}&missing={{ key }}" style="display:block; height:100%; text-decoration:none;">
+                        <div class="progress-fill" style="width: {{ percent }}%">
+                            {{ t.view_missing or 'View missing' }}
+                        </div>
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="card">
+                <h2>{{ t.timing_integrity or 'Timing Integrity' }}</h2>
+                <div class="chart-container compact">
+                    <canvas id="timingIntegrityChart"></canvas>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.check or 'Check' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                            <th>{{ t.action or 'Action' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ t.negative_uptake or 'Negative uptake times' }}</td>
+                            <td>{{ timing_stats.negative }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&timing_issue=negative">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                        <tr>
+                            <td>{{ t.uptake_too_long or 'Uptake time > 240 min' }}</td>
+                            <td>{{ timing_stats.too_long }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&timing_issue=too_long">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                        <tr>
+                            <td>{{ t.time_parse_fail or 'Timestamp parse failures' }}</td>
+                            <td>{{ timing_stats.parse_fail }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&timing_issue=parse_fail">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                        <tr>
+                            <td>{{ t.study_time_conflict or 'Series time vs study time conflict' }}</td>
+                            <td>{{ timing_stats.study_time_conflict }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&timing_issue=study_time_conflict">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>{{ t.dose_plausibility or 'Dose Plausibility' }}</h2>
+                <div class="chart-container compact">
+                    <canvas id="dosePlausibilityChart"></canvas>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.check or 'Check' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                            <th>{{ t.action or 'Action' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ t.dose_outliers or 'Outliers (>3σ)' }}</td>
+                            <td>{{ dose_stats.outliers }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&dose_issue=outlier">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                        <tr>
+                            <td>{{ t.unit_mismatch or 'Possible unit mismatch' }}</td>
+                            <td>{{ dose_stats.unit_mismatch }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&dose_issue=unit_mismatch">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                        <tr>
+                            <td>{{ t.missing_activity_has_weight or 'Missing activity (weight present)' }}</td>
+                            <td>{{ dose_stats.missing_activity_has_weight }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&dose_issue=missing_activity">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                        <tr>
+                            <td>{{ t.missing_weight_has_activity or 'Missing weight (activity present)' }}</td>
+                            <td>{{ dose_stats.missing_weight_has_activity }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&dose_issue=missing_weight">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="card">
+                <h2>{{ t.scanner_landscape or 'Scanner Landscape' }}</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.manufacturer or 'Manufacturer' }}</th>
+                            <th>{{ t.model or 'Model' }}</th>
+                            <th>{{ t.software_version or 'Software' }}</th>
+                            <th>{{ t.series or 'Series' }}</th>
+                            <th>{{ t.unique_recon_fps or 'Unique CSA' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in scanner_landscape[:10] %}
+                        <tr>
+                            <td>{{ row.manufacturer }}</td>
+                            <td>{{ row.model }}</td>
+                            <td>{{ row.software }}</td>
+                            <td>{{ row.count }}</td>
+                            <td>{{ row.unique_csa }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>{{ t.protocol_radiopharm or 'Protocol × Radiopharmaceutical' }}</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.radiopharmaceutical or 'Radiopharmaceutical' }}</th>
+                            <th>{{ t.unique_recon_fps or 'Unique CSA' }}</th>
+                            <th>{{ t.top_fingerprint or 'Top fingerprint' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in protocol_radiopharm[:10] %}
+                        <tr>
+                            <td>{{ row.radiopharmaceutical }}</td>
+                            <td>{{ row.unique_fps }}</td>
+                            <td>{{ row.top_fp }}</td>
+                            <td>{{ row.top_count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="card">
+                <h2>{{ t.derived_objects_qa or 'Derived Objects QA' }}</h2>
+                <div class="stat-grid">
+                    <div class="stat-box">
+                        <div class="stat-value">{{ derived_stats.seg }}</div>
+                        <div class="stat-label">SEG</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ derived_stats.rtstruct }}</div>
+                        <div class="stat-label">RTSTRUCT</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ derived_stats.highdicom }}</div>
+                        <div class="stat-label">highdicom</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ derived_stats.qiicr }}</div>
+                        <div class="stat-label">QIICR</div>
+                    </div>
+                </div>
+                {% if derived_stats.ctp_labels and derived_stats.ctp_labels|length %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.ctp_label or 'CTP Label' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in derived_stats.ctp_labels %}
+                        <tr>
+                            <td>{{ row.value_text }}</td>
+                            <td>{{ row.count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+            </div>
+
+            <div class="card">
+                <h2>{{ t.duplicates_or_collisions or 'Duplicates & Collisions' }}</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.check or 'Check' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ t.duplicate_sop or 'Duplicate SOPInstanceUID' }}</td>
+                            <td>{{ duplicate_stats.duplicate_sop }}</td>
+                        </tr>
+                        <tr>
+                            <td>{{ t.duplicate_series_signatures or 'Duplicate series signatures' }}</td>
+                            <td>{{ duplicate_stats.duplicate_series_signatures }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="card">
+                <h2>{{ t.study_composition or 'Study Composition' }}</h2>
+                <div class="chart-container compact">
+                    <canvas id="studyCompositionChart"></canvas>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.check or 'Check' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                            <th>{{ t.action or 'Action' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ t.missing_ct or 'Studies missing CT' }}</td>
+                            <td>{{ study_comp_stats.missing_ct }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&composition=missing_ct">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                        <tr>
+                            <td>{{ t.missing_pt or 'Studies missing PT' }}</td>
+                            <td>{{ study_comp_stats.missing_pt }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&composition=missing_pt">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                        <tr>
+                            <td>{{ t.high_series_count or 'Studies with >20 series' }}</td>
+                            <td>{{ study_comp_stats.high_series }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&composition=high_series">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <div class="card-title-row">
+                    <h2>{{ t.qa_score_distribution or 'QA Score Distribution' }}</h2>
+                    <button class="info-button" type="button" aria-label="{{ t.qa_score_help or 'QA score help' }}" title="{{ t.qa_score_help or 'QA score help' }}" onclick="showQaScoreHelp()">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="chart-container compact">
+                    <canvas id="qaScoreChart"></canvas>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{{ t.qa_score or 'QA Score' }}</th>
+                            <th>{{ t.count or 'Count' }}</th>
+                            <th>{{ t.action or 'Action' }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for score in range(0, 6) %}
+                        <tr>
+                            <td>{{ score }}</td>
+                            <td>{{ qa_scores[score] }}</td>
+                            <td><a href="/?db={{ db_name }}&lang={{ lang }}&qa_score={{ score }}">{{ t.view_studies or 'View studies' }}</a></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
     
     <script>
@@ -919,6 +1253,76 @@
                 }
             });
             return `/?${urlParams.toString()}`;
+        }
+
+        function showQaScoreHelp() {
+            const message = [
+                'QA score is 0-5 based on representative series:',
+                '1 point: patient weight present',
+                '1 point: injected activity present (radiopharm modalities only)',
+                '1 point: injection time present (radiopharm modalities only)',
+                '1 point: uptake time computed and valid',
+                '1 point: timing is consistent (no negative or extreme delay)'
+            ].join('\n');
+            alert(message);
+        }
+
+        function createBarChart(ctx, labels, values, options) {
+            return new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: options.fill || chartTheme.blueFill,
+                        borderColor: options.border || chartTheme.blueBorder,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: chartTheme.text
+                            },
+                            grid: {
+                                color: chartTheme.grid
+                            },
+                            title: options.yTitle ? {
+                                display: true,
+                                text: options.yTitle,
+                                color: chartTheme.text
+                            } : undefined
+                        },
+                        x: {
+                            ticks: {
+                                color: chartTheme.text
+                            },
+                            grid: {
+                                color: chartTheme.grid
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: chartTheme.tooltipBg,
+                            titleColor: chartTheme.tooltipText,
+                            bodyColor: chartTheme.tooltipText,
+                            callbacks: {
+                                title: function() {
+                                    return '';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         // Uptake Time Chart
@@ -994,7 +1398,11 @@
                                     const end = start + width;
                                     const startLabel = formatWithPrecision(start, labels);
                                     const endLabel = formatWithPrecision(end, labels);
-                                    return `range ${startLabel}-${endLabel}`;
+                                    const studyCount = context.parsed.y ?? 0;
+                                    return [
+                                        `range ${startLabel}-${endLabel}`,
+                                        `Study Count: ${studyCount}`
+                                    ];
                                 }
                                 return '';
                             }
@@ -1095,7 +1503,11 @@
                                     const end = start + width;
                                     const startLabel = formatWithPrecision(start, labels);
                                     const endLabel = formatWithPrecision(end, labels);
-                                    return `range ${startLabel}-${endLabel}`;
+                                    const studyCount = context.parsed.y ?? 0;
+                                    return [
+                                        `range ${startLabel}-${endLabel}`,
+                                        `Study Count: ${studyCount}`
+                                    ];
                                 }
                                 return '';
                             }
@@ -1122,6 +1534,125 @@
             }
         });
         {% endif %}
+
+        const completenessChartEl = document.getElementById('completenessChart');
+        if (completenessChartEl) {
+            const completenessLabels = [
+                '{{ t.patient_weight or "Weight" }}',
+                '{{ t.injected_activity or "Injected Activity" }}',
+                '{{ t.injection_time or "Injection Time" }}',
+                '{{ t.acquisition_time or "Acquisition Time" }}',
+                '{{ t.radiopharmaceutical or "Radiopharmaceutical" }}',
+                '{{ t.patient_sex or "Patient Sex" }}',
+                '{{ t.patient_age or "Patient Age" }}'
+            ];
+            const completenessCounts = [
+                {{ counts.weight if counts and "weight" in counts else 0 }},
+                {{ counts.dose if counts and "dose" in counts else 0 }},
+                {{ counts.injection_time if counts and "injection_time" in counts else 0 }},
+                {{ counts.acquisition_time if counts and "acquisition_time" in counts else 0 }},
+                {{ counts.radiopharmaceutical if counts and "radiopharmaceutical" in counts else 0 }},
+                {{ counts.patient_sex if counts and "patient_sex" in counts else 0 }},
+                {{ counts.patient_age if counts and "patient_age" in counts else 0 }}
+            ];
+            const completenessDenoms = [
+                {{ totals.get('weight', total_series) }},
+                {{ totals.get('dose', total_series) }},
+                {{ totals.get('injection_time', total_series) }},
+                {{ totals.get('acquisition_time', total_series) }},
+                {{ totals.get('radiopharmaceutical', total_series) }},
+                {{ totals.get('patient_sex', total_series) }},
+                {{ totals.get('patient_age', total_series) }}
+            ];
+            const completenessValues = completenessCounts.map((count, idx) => {
+                const denom = completenessDenoms[idx] || 0;
+                return denom ? (count / denom * 100) : 0;
+            });
+            createBarChart(completenessChartEl.getContext('2d'), completenessLabels, completenessValues, {
+                fill: chartTheme.blueFill,
+                border: chartTheme.blueBorder,
+                yTitle: '{{ t.percent or "Percent" }}'
+            });
+        }
+
+        const timingChartEl = document.getElementById('timingIntegrityChart');
+        if (timingChartEl) {
+            const timingLabels = [
+                '{{ t.negative_uptake or "Negative uptake times" }}',
+                '{{ t.uptake_too_long or "Uptake time > 240 min" }}',
+                '{{ t.time_parse_fail or "Timestamp parse failures" }}',
+                '{{ t.study_time_conflict or "Series time vs study time conflict" }}'
+            ];
+            const timingValues = [
+                {{ timing_stats.negative }},
+                {{ timing_stats.too_long }},
+                {{ timing_stats.parse_fail }},
+                {{ timing_stats.study_time_conflict }}
+            ];
+            createBarChart(timingChartEl.getContext('2d'), timingLabels, timingValues, {
+                fill: chartTheme.orangeFill,
+                border: chartTheme.orangeBorder,
+                yTitle: '{{ t.count or "Count" }}'
+            });
+        }
+
+        const dosePlausibilityChartEl = document.getElementById('dosePlausibilityChart');
+        if (dosePlausibilityChartEl) {
+            const doseLabels = [
+                '{{ t.dose_outliers or "Outliers (>3σ)" }}',
+                '{{ t.unit_mismatch or "Possible unit mismatch" }}',
+                '{{ t.missing_activity_has_weight or "Missing activity (weight present)" }}',
+                '{{ t.missing_weight_has_activity or "Missing weight (activity present)" }}'
+            ];
+            const doseValues = [
+                {{ dose_stats.outliers }},
+                {{ dose_stats.unit_mismatch }},
+                {{ dose_stats.missing_activity_has_weight }},
+                {{ dose_stats.missing_weight_has_activity }}
+            ];
+            createBarChart(dosePlausibilityChartEl.getContext('2d'), doseLabels, doseValues, {
+                fill: chartTheme.orangeFill,
+                border: chartTheme.orangeBorder,
+                yTitle: '{{ t.count or "Count" }}'
+            });
+        }
+
+        const compositionChartEl = document.getElementById('studyCompositionChart');
+        if (compositionChartEl) {
+            const compositionLabels = [
+                '{{ t.missing_ct or "Studies missing CT" }}',
+                '{{ t.missing_pt or "Studies missing PT" }}',
+                '{{ t.high_series_count or "Studies with >20 series" }}'
+            ];
+            const compositionValues = [
+                {{ study_comp_stats.missing_ct }},
+                {{ study_comp_stats.missing_pt }},
+                {{ study_comp_stats.high_series }}
+            ];
+            createBarChart(compositionChartEl.getContext('2d'), compositionLabels, compositionValues, {
+                fill: chartTheme.blueFill,
+                border: chartTheme.blueBorder,
+                yTitle: '{{ t.count or "Count" }}'
+            });
+        }
+
+        const qaScoreChartEl = document.getElementById('qaScoreChart');
+        if (qaScoreChartEl) {
+            const qaLabels = ['0', '1', '2', '3', '4', '5'];
+            const qaValues = [
+                {{ qa_scores[0] }},
+                {{ qa_scores[1] }},
+                {{ qa_scores[2] }},
+                {{ qa_scores[3] }},
+                {{ qa_scores[4] }},
+                {{ qa_scores[5] }}
+            ];
+            createBarChart(qaScoreChartEl.getContext('2d'), qaLabels, qaValues, {
+                fill: chartTheme.greenLine,
+                border: chartTheme.greenLine,
+                yTitle: '{{ t.count or "Count" }}'
+            });
+        }
     </script>
     <script>
         const topMenuButton = document.getElementById('top-dashboard-hamburger');
