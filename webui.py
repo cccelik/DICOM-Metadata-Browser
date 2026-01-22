@@ -5,6 +5,7 @@ Clean Web UI for DICOM Metadata Browser
 
 from flask import Flask, render_template, request, jsonify, session, redirect, send_from_directory, Response
 import sqlite3
+import math
 from pathlib import Path
 import os
 import tempfile
@@ -482,6 +483,17 @@ def parse_float_arg(value: Optional[str]) -> Optional[float]:
         return None
 
 
+def count_decimal_places(value: Optional[str]) -> int:
+    if value is None:
+        return 0
+    value = value.strip()
+    if not value:
+        return 0
+    if "." not in value:
+        return 0
+    return len(value.split(".", 1)[1])
+
+
 def parse_db_float(value: Optional[object]) -> Optional[float]:
     """Coerce db values to float without throwing on non-numeric input."""
     if value is None:
@@ -511,6 +523,64 @@ def get_patient_weight(row_dict: dict) -> Optional[float]:
     if size_value is not None and size_value > 10 and size_value <= 500:
         return size_value
     return None
+
+
+def compute_delay_minutes(row_dict: dict) -> Optional[float]:
+    if (row_dict.get('injection_date') or row_dict.get('study_date')) and \
+       row_dict.get('injection_time') and \
+       (row_dict.get('acquisition_date') or row_dict.get('study_date')) and \
+       row_dict.get('acquisition_time'):
+        injection_date = row_dict.get('injection_date') or row_dict.get('study_date')
+        acquisition_date = row_dict.get('acquisition_date') or row_dict.get('study_date')
+        delay_minutes, _ = calculate_injection_delay(
+            injection_date,
+            row_dict['injection_time'],
+            acquisition_date,
+            row_dict['acquisition_time'],
+            injection_date_missing=(row_dict.get('injection_date') is None)
+        )
+        if delay_minutes and delay_minutes > 0:
+            return delay_minutes
+    return None
+
+
+def compute_dose_per_kg(row_dict: dict) -> Optional[float]:
+    study_weight = parse_db_float(row_dict.get('study_patient_weight'))
+    injected_activity = parse_db_float(row_dict.get('injected_activity'))
+    if study_weight is None or study_weight <= 0 or injected_activity is None:
+        return None
+    activity_per_kg = injected_activity / study_weight
+    dose_per_kg = activity_per_kg / 1e6 if activity_per_kg > 1e6 else activity_per_kg
+    if 0 < dose_per_kg < 100:
+        return dose_per_kg
+    return None
+
+
+def select_study_representatives(rows):
+    representatives = {}
+    for row in rows:
+        row_dict = dict(row)
+        study_uid = row_dict.get('study_instance_uid')
+        if not study_uid:
+            continue
+        delay_minutes = compute_delay_minutes(row_dict)
+        dose_per_kg = compute_dose_per_kg(row_dict)
+        score = 0
+        if dose_per_kg is not None:
+            score += 3
+        if delay_minutes is not None:
+            score += 2
+        if is_radiopharm_modality(row_dict.get('modality') or ''):
+            score += 1
+        current = representatives.get(study_uid)
+        if current is None or score > current["score"]:
+            representatives[study_uid] = {
+                "score": score,
+                "row": row_dict,
+                "delay_minutes": delay_minutes,
+                "dose_per_kg": dose_per_kg
+            }
+    return representatives
 
 
 def fuzzy_match(text1, text2, threshold=0.6):
@@ -612,9 +682,13 @@ def index():
     deleted = request.args.get('deleted', '0')
     deleted_count = request.args.get('count', '0')
     uptake_min = parse_float_arg(request.args.get('uptake_min'))
-    uptake_max = parse_float_arg(request.args.get('uptake_max'))
+    uptake_max_raw = request.args.get('uptake_max')
+    uptake_max = parse_float_arg(uptake_max_raw)
     dose_min = parse_float_arg(request.args.get('dose_min'))
-    dose_max = parse_float_arg(request.args.get('dose_max'))
+    dose_max_raw = request.args.get('dose_max')
+    dose_max = parse_float_arg(dose_max_raw)
+    uptake_max_precision = count_decimal_places(uptake_max_raw)
+    dose_max_precision = count_decimal_places(dose_max_raw)
     modality_filters = [m.strip() for m in request.args.getlist('modality') if m.strip()]
     manufacturer_filters = [m.strip() for m in request.args.getlist('manufacturer') if m.strip()]
     radiopharmaceutical_filters = [r.strip() for r in request.args.getlist('radiopharmaceutical') if r.strip()]
@@ -700,6 +774,8 @@ def index():
                     r.acquisition_time,
                     r.acquisition_date,
                     r.study_date,
+                    r.radiopharmaceutical,
+                    r.modality,
                     p.patient_weight as study_patient_weight
                 FROM ranked r
                 LEFT JOIN (
@@ -717,48 +793,26 @@ def index():
                         return False
                     if uptake_min is not None and delay_minutes < uptake_min:
                         return False
-                    if uptake_max is not None and delay_minutes > uptake_max:
-                        return False
+                    if uptake_max is not None:
+                        compare_delay = round(delay_minutes, uptake_max_precision) if uptake_max_precision else delay_minutes
+                        if compare_delay > uptake_max:
+                            return False
                 if dose_min is not None or dose_max is not None:
                     if dose_per_kg is None:
                         return False
                     if dose_min is not None and dose_per_kg < dose_min:
                         return False
-                    if dose_max is not None and dose_per_kg > dose_max:
-                        return False
+                    if dose_max is not None:
+                        compare_dose = round(dose_per_kg, dose_max_precision) if dose_max_precision else dose_per_kg
+                        if compare_dose > dose_max:
+                            return False
                 return True
 
+            representatives = select_study_representatives(rows)
             filtered_study_uids = set()
-            for row in rows:
-                row_dict = dict(row)
-                delay_minutes = None
-                if (row_dict.get('injection_date') or row_dict.get('study_date')) and \
-                   row_dict.get('injection_time') and \
-                   (row_dict.get('acquisition_date') or row_dict.get('study_date')) and \
-                   row_dict.get('acquisition_time'):
-                    injection_date = row_dict.get('injection_date') or row_dict.get('study_date')
-                    acquisition_date = row_dict.get('acquisition_date') or row_dict.get('study_date')
-                    delay_minutes, _ = calculate_injection_delay(
-                        injection_date,
-                        row_dict['injection_time'],
-                        acquisition_date,
-                        row_dict['acquisition_time'],
-                        injection_date_missing=(row_dict.get('injection_date') is None)
-                    )
-                    if delay_minutes is not None and delay_minutes <= 0:
-                        delay_minutes = None
-
-                patient_weight = get_patient_weight(row_dict)
-                injected_activity = parse_db_float(row_dict.get('injected_activity'))
-                dose_per_kg = None
-                if patient_weight is not None and injected_activity is not None and patient_weight > 0:
-                    activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
-                    dose_per_kg = activity_mbq / patient_weight
-                    if dose_per_kg <= 0 or dose_per_kg >= 100:
-                        dose_per_kg = None
-
-                if matches_filters(delay_minutes, dose_per_kg):
-                    filtered_study_uids.add(row_dict['study_instance_uid'])
+            for entry in representatives.values():
+                if matches_filters(entry["delay_minutes"], entry["dose_per_kg"]):
+                    filtered_study_uids.add(entry["row"]["study_instance_uid"])
         
         if search_term:
             query, params = build_search_query(search_term)
@@ -1527,6 +1581,7 @@ def dashboard():
                 FROM dicom_metadata s
             )
             SELECT 
+                r.study_instance_uid,
                 r.injected_activity,
                 r.patient_weight,
                 r.patient_size,
@@ -1708,6 +1763,22 @@ def dashboard():
                     ct_bucket["dlp"].append(row_dict["dlp"])
                 ct_bucket["count"] += 1
 
+        representatives = select_study_representatives(rows)
+        study_uptake_times = [
+            entry["delay_minutes"]
+            for entry in representatives.values()
+            if entry["delay_minutes"] is not None
+        ]
+        study_doses_per_kg = [
+            entry["dose_per_kg"]
+            for entry in representatives.values()
+            if entry["dose_per_kg"] is not None
+        ]
+
+        # Use study-level values for the dashboard charts so clicks map to visible studies.
+        uptake_times = study_uptake_times
+        doses_per_kg = study_doses_per_kg
+
         
         # Calculate statistics
         import statistics
@@ -1886,7 +1957,7 @@ def dashboard():
         }
         
         # Create histogram data for charts
-        def create_histogram(data, bins=20, min_val=None, max_val=None):
+        def create_histogram(data, bins=20, min_val=None, max_val=None, precision=1, bin_width=None, max_bins=60):
             if not data:
                 return {'labels': [], 'values': []}
             
@@ -1898,13 +1969,16 @@ def dashboard():
             # Ensure we have valid range
             if max_val <= min_val:
                 max_val = min_val + 1
-            
+
+            if bin_width:
+                bins = int(math.ceil((max_val - min_val) / bin_width))
+                bins = max(1, min(bins, max_bins))
             bin_width = (max_val - min_val) / bins
             histogram = [0] * bins
             labels = []
             
             for i in range(bins):
-                labels.append(f"{min_val + i * bin_width:.1f}")
+                labels.append(f"{min_val + i * bin_width:.{precision}f}")
             
             for value in data:
                 val = float(value)
@@ -1916,16 +1990,20 @@ def dashboard():
         
         uptake_histogram = create_histogram(
             uptake_times, 
-            bins=20, 
             min_val=0, 
-            max_val=float(max(uptake_times)) if uptake_times else 180.0
+            max_val=float(max(uptake_times)) if uptake_times else 180.0,
+            precision=1,
+            bin_width=5,
+            max_bins=60
         )
         
         dose_histogram = create_histogram(
             doses_per_kg,
-            bins=20,
             min_val=0,
-            max_val=float(max(doses_per_kg)) if doses_per_kg else 10.0
+            max_val=float(max(doses_per_kg)) if doses_per_kg else 10.0,
+            precision=2,
+            bin_width=0.1,
+            max_bins=80
         )
         
         # Ensure all histogram data is JSON serializable (convert to lists explicitly)
