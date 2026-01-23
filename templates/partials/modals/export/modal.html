@@ -1,0 +1,83 @@
+<div id="export-modal" class="export-modal" aria-hidden="true">
+    <div class="export-modal-content" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
+        <div class="export-modal-header">
+            <h3 id="export-modal-title">{{ t.export_csv_title }}</h3>
+            <button type="button" class="export-modal-close" data-export-close aria-label="{{ t.close }}">×</button>
+        </div>
+        <div class="export-modal-body">
+            <div class="export-modal-actions">
+                <div>
+                    <strong>{{ t.export_select_fields }}</strong>
+                </div>
+                <div class="export-action-group">
+                    <button type="button" class="export-small-button" id="export-select-all">{{ t.export_select_all }}</button>
+                    <button type="button" class="export-small-button" id="export-select-none">{{ t.export_select_none }}</button>
+                </div>
+            </div>
+            <div class="export-modal-actions" style="justify-content: flex-start; margin-top: 10px;">
+                <label class="export-field">
+                    <input type="checkbox" id="export-group-modality">
+                    <span>{{ t.export_group_modality }}</span>
+                </label>
+            </div>
+            <div class="export-modal-actions" style="justify-content: flex-start;">
+                <label class="export-field">
+                    <input type="checkbox" id="export-sectioned">
+                    <span>{{ t.export_sectioned }}</span>
+                </label>
+            </div>
+            <div class="export-sections">
+                {% for section in export_sections %}
+                <div class="export-section">
+                    <label class="export-section-header">
+                        <input type="checkbox" class="export-section-toggle" data-export-section="{{ section.key }}">
+                        <span>{{ section.label }}</span>
+                    </label>
+                    <div class="export-field-grid">
+                        {% for field in section.fields %}
+                        <label class="export-field">
+                            <input
+                                type="checkbox"
+                                class="export-field-toggle"
+                                data-export-field="{{ field.name }}"
+                                data-section="{{ section.key }}"
+                                {% if field.default %}checked{% endif %}
+                            >
+                            <span>{{ field.label }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+                {% if export_modalities %}
+                <div class="export-section">
+                    <div class="export-section-header">{{ t.modalities }}</div>
+                    <div class="export-modal-actions" style="margin-bottom: 12px;">
+                        <div class="export-action-group">
+                            <button type="button" class="export-small-button" id="export-modalities-all">{{ t.export_select_all }}</button>
+                            <button type="button" class="export-small-button" id="export-modalities-none">{{ t.export_select_none }}</button>
+                        </div>
+                    </div>
+                    <div class="export-field-grid">
+                        {% for modality in export_modalities %}
+                        <label class="export-field">
+                            <input
+                                type="checkbox"
+                                class="export-modality-toggle"
+                                data-export-modality="{{ modality }}"
+                                checked
+                            >
+                            <span>{{ modality }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="export-modal-footer">
+            <button type="button" class="export-secondary" data-export-close>{{ t.cancel }}</button>
+            <button type="button" class="export-primary" id="export-confirm">{{ t.export_download }}</button>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,94 @@
+<script>
+    function closeAnyHamburgerMenu() {
+        const menus = [
+            { button: 'top-dashboard-hamburger', menu: 'top-dashboard-menu' },
+            { button: 'top-index-hamburger', menu: 'top-index-menu' },
+            { button: 'top-study-hamburger', menu: 'top-study-menu' }
+        ];
+        menus.forEach((item) => {
+            const button = document.getElementById(item.button);
+            const menu = document.getElementById(item.menu);
+            if (button && menu) {
+                button.setAttribute('aria-expanded', 'false');
+                menu.classList.remove('open');
+            }
+        });
+    }
+
+    function createDatabank() {
+        const modal = document.getElementById('create-db-modal');
+        const input = document.getElementById('create-db-name');
+        if (!modal || !input) {
+            return;
+        }
+        modal.classList.add('active');
+        modal.setAttribute('aria-hidden', 'false');
+        input.value = '';
+        setTimeout(() => input.focus(), 0);
+        closeAnyHamburgerMenu();
+    }
+
+    function closeCreateDb() {
+        const modal = document.getElementById('create-db-modal');
+        if (!modal) {
+            return;
+        }
+        modal.classList.remove('active');
+        modal.setAttribute('aria-hidden', 'true');
+    }
+
+    function submitCreateDb() {
+        const input = document.getElementById('create-db-name');
+        const name = input ? input.value.trim() : '';
+        if (!name) {
+            return;
+        }
+        const formData = new FormData();
+        formData.append('name', name);
+        fetch('/databanks/create', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const urlParams = new URLSearchParams(window.location.search);
+                const lang = urlParams.get('lang') || 'en';
+                const target = `/?db=${encodeURIComponent(data.name)}&lang=${encodeURIComponent(lang)}`;
+                window.location.href = target;
+            } else {
+                alert(data.message || 'Failed to create databank.');
+            }
+        })
+        .catch(error => {
+            alert(error.message || 'Failed to create databank.');
+        })
+        .finally(() => {
+            closeCreateDb();
+        });
+    }
+
+    function bindCreateDatabankButtons() {
+        document.querySelectorAll('.databank-create').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                createDatabank();
+            });
+        });
+    }
+
+    document.addEventListener('click', (event) => {
+        const modal = document.getElementById('create-db-modal');
+        if (modal && event.target === modal) {
+            closeCreateDb();
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', bindCreateDatabankButtons);
+    bindCreateDatabankButtons();
+
+    window.createDatabank = createDatabank;
+    window.closeCreateDb = closeCreateDb;
+    window.submitCreateDb = submitCreateDb;
+</script>

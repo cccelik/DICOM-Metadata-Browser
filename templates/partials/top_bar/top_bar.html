@@ -1,0 +1,35 @@
+{% macro render_top_bar(menu_button_id, menu_id, title_sub, lang_url_template, databank_url_template, t, lang, db_name, databanks) %}
+<div class="top-bar">
+    <div class="top-bar-left">
+        <div class="hamburger-wrapper">
+            <button id="{{ menu_button_id }}" class="hamburger-button" aria-label="Open menu" aria-expanded="false" aria-controls="{{ menu_id }}">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            <div id="{{ menu_id }}" class="hamburger-menu">
+                <div class="hamburger-menu-inner">
+                    {{ caller() }}
+                    {% include "partials/top_bar/theme_toggle_button.html" %}
+                </div>
+                <div class="hamburger-lang">
+                    <a href="{{ lang_url_template|format('en') }}" class="lang-toggle {% if lang == 'en' %}active{% endif %}">EN</a>
+                    <a href="{{ lang_url_template|format('de') }}" class="lang-toggle {% if lang == 'de' %}active{% endif %}">DE</a>
+                </div>
+                {% include "partials/top_bar/databanks.html" %}
+            </div>
+        </div>
+        <div class="top-bar-copy">
+            <span>{{ t.top_bar_primary }}</span>
+            <strong>{{ t.top_bar_secondary }}</strong>
+        </div>
+    </div>
+    <div class="top-bar-center">
+        <span class="title-main">DICOM Metadata Browser</span>
+        <span class="title-sub">{{ title_sub|safe }}</span>
+    </div>
+    <div class="top-bar-right">
+        <img src="{{ url_for('tum_logo') }}" alt="TUM Logo">
+    </div>
+</div>
+{% endmacro %}

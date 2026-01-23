@@ -1,0 +1,59 @@
+<script>
+    const topMenuButton = document.getElementById('{{ menu_button_id }}');
+    const topMenu = document.getElementById('{{ menu_id }}');
+    const themeToggleButton = document.getElementById('theme-toggle');
+
+    if (topMenuButton && topMenu) {
+        topMenuButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const expanded = topMenuButton.getAttribute('aria-expanded') === 'true';
+            topMenuButton.setAttribute('aria-expanded', String(!expanded));
+            topMenu.classList.toggle('open', !expanded);
+        });
+
+        document.addEventListener('click', (event) => {
+            if (!topMenu.contains(event.target) && !topMenuButton.contains(event.target)) {
+                topMenuButton.setAttribute('aria-expanded', 'false');
+                topMenu.classList.remove('open');
+            }
+        });
+    }
+
+    function closeTopMenu() {
+        if (topMenuButton && topMenu) {
+            topMenuButton.setAttribute('aria-expanded', 'false');
+            topMenu.classList.remove('open');
+        }
+    }
+
+    function applyTheme(theme) {
+        const isDark = theme === 'dark';
+        document.body.classList.toggle('dark', isDark);
+        if (themeToggleButton) {
+            const nextLabel = isDark
+                ? (themeToggleButton.dataset.light || 'Light Mode')
+                : (themeToggleButton.dataset.dark || 'Dark Mode');
+            const nextIcon = isDark
+                ? (themeToggleButton.dataset.lightIcon || 'ph-sun')
+                : (themeToggleButton.dataset.darkIcon || 'ph-moon');
+            themeToggleButton.innerHTML = `<i class="ph ${nextIcon}" aria-hidden="true"></i>`;
+            themeToggleButton.setAttribute('aria-label', nextLabel);
+            themeToggleButton.setAttribute('title', nextLabel);
+        }
+        localStorage.setItem('theme', theme);
+    }
+
+    if (themeToggleButton) {
+        themeToggleButton.addEventListener('click', () => {
+            const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
+            applyTheme(nextTheme);
+            closeTopMenu();
+            {% if reload_on_theme_change %}
+            window.location.reload();
+            {% endif %}
+        });
+    }
+
+    const storedTheme = localStorage.getItem('theme') || 'light';
+    applyTheme(storedTheme);
+</script>

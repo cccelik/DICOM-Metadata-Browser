@@ -1,0 +1,14 @@
+{% from "partials/modals/modal.html" import modal_wrapper %}
+
+{% call modal_wrapper("create-db-modal", t.create_databank or 'Create Databank') %}
+    <p>{{ t.create_databank_hint or 'Enter a name for the new databank.' }}</p>
+    <input id="create-db-name" class="modal-input" type="text" placeholder="{{ t.databank_name or 'Databank name' }}">
+    <div class="modal-actions">
+        <button class="modal-close modal-secondary" type="button" onclick="closeCreateDb()">
+            {{ t.cancel or 'Cancel' }}
+        </button>
+        <button class="modal-close" type="button" onclick="submitCreateDb()">
+            {{ t.create or 'Create' }}
+        </button>
+    </div>
+{% endcall %}

@@ -1,0 +1,120 @@
+    const isDarkTheme = document.body.classList.contains('dark');
+    const chartTheme = {
+        text: isDarkTheme ? '#e6edf3' : '#2c3e50',
+        grid: isDarkTheme ? '#243244' : '#ddd',
+        blueFill: isDarkTheme ? 'rgba(86, 173, 255, 0.6)' : 'rgba(52, 152, 219, 0.6)',
+        blueBorder: isDarkTheme ? 'rgba(86, 173, 255, 1)' : 'rgba(52, 152, 219, 1)',
+        orangeFill: isDarkTheme ? 'rgba(243, 156, 18, 0.7)' : 'rgba(230, 126, 34, 0.6)',
+        orangeBorder: isDarkTheme ? 'rgba(243, 156, 18, 1)' : 'rgba(230, 126, 34, 1)',
+        greenLine: 'rgba(39, 174, 96, 1)',
+        tooltipBg: isDarkTheme ? '#1e2936' : 'rgba(0, 0, 0, 0.8)',
+        tooltipText: isDarkTheme ? '#e6edf3' : '#f8f9fa'
+    };
+
+    function getBinWidth(labels) {
+        if (!labels || labels.length < 2) {
+            return null;
+        }
+        const first = parseFloat(labels[0]);
+        const second = parseFloat(labels[1]);
+        if (Number.isNaN(first) || Number.isNaN(second)) {
+            return null;
+        }
+        return Math.abs(second - first);
+    }
+
+    function getLabelPrecision(labels) {
+        if (!labels || !labels.length) {
+            return 0;
+        }
+        const sample = labels.find((label) => label.includes('.')) || labels[0];
+        const dotIndex = sample.indexOf('.');
+        if (dotIndex === -1) {
+            return 0;
+        }
+        return sample.length - dotIndex - 1;
+    }
+
+    function formatWithPrecision(value, labels) {
+        const precision = getLabelPrecision(labels);
+        return value.toFixed(precision);
+    }
+
+    function buildIndexUrl(params) {
+        const urlParams = new URLSearchParams(window.location.search);
+        urlParams.set('db', '{{ db_name }}');
+        urlParams.set('lang', '{{ lang }}');
+        Object.entries(params).forEach(([key, value]) => {
+            if (value === null || value === undefined || value === '') {
+                urlParams.delete(key);
+            } else {
+                urlParams.set(key, value);
+            }
+        });
+        return `/?${urlParams.toString()}`;
+    }
+
+    function createBarChart(ctx, labels, values, options = {}) {
+        if (!ctx) {
+            return;
+        }
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: options.label || '{{ t.study_count or "Study Count" }}',
+                    data: values,
+                    backgroundColor: options.fill || chartTheme.blueFill,
+                    borderColor: options.border || chartTheme.blueBorder,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            color: chartTheme.text
+                        },
+                        grid: {
+                            color: chartTheme.grid
+                        },
+                        title: {
+                            display: true,
+                            text: options.yTitle || '{{ t.study_count or "Study Count" }}',
+                            color: chartTheme.text
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            color: chartTheme.text
+                        },
+                        grid: {
+                            color: chartTheme.grid
+                        },
+                        title: {
+                            display: !!options.xTitle,
+                            text: options.xTitle || '',
+                            color: chartTheme.text
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: !!options.label,
+                        labels: {
+                            color: chartTheme.text
+                        }
+                    },
+                    tooltip: options.tooltip || {
+                        backgroundColor: chartTheme.tooltipBg,
+                        titleColor: chartTheme.tooltipText,
+                        bodyColor: chartTheme.tooltipText
+                    }
+                }
+            }
+        });
+    }

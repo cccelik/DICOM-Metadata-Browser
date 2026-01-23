@@ -20,233 +20,9 @@
             line-height: 1.6;
         }
         
-        .lang-toggle {
-            padding: 6px 12px;
-            text-decoration: none;
-            border-radius: 4px;
-            font-size: 14px;
-            color: #7f8c8d;
-            font-weight: 400;
-        }
-
-        .lang-toggle.active {
-            background: #3498db;
-            color: white;
-            font-weight: 500;
-        }
-
-        .top-bar {
-            width: 100%;
-            background: #fff;
-            border-bottom: 4px solid #4e85e9;
-            color: #0c2e49;
-            padding: 12px 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-        }
-
-        .top-bar-left {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .top-bar-copy span,
-        .top-bar-copy strong {
-            font-size: 16px;
-            font-weight: 400;
-        }
-
-        .top-bar-copy {
-            display: flex;
-            flex-direction: column;
-            font-size: 13px;
-            line-height: 1.2;
-        }
-
-        .top-bar-copy strong {
-            font-weight: normal;
-        }
-
-        .top-bar-center {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-            flex: 1;
-            text-align: center;
-        }
-
-        .top-bar-center .title-main {
-            font-size: 20px;
-            font-weight: 600;
-            color: #0c2e49;
-        }
-
-        .top-bar-center .title-sub {
-            font-size: 14px;
-            font-weight: 400;
-            color: #5c6b84;
-        }
-
-        .top-bar-right {
-            font-size: 13px;
-            text-align: right;
-            line-height: 1.3;
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-            gap: 4px;
-        }
-
-        .top-bar-right img {
-            height: 100px;
-        }
-
-        .hamburger-wrapper {
-            position: relative;
-            display: inline-flex;
-            align-items: center;
-        }
-
-        .hamburger-button {
-            width: 38px;
-            height: 38px;
-            border-radius: 8px;
-            border: 1px solid rgba(0, 0, 0, 0.2);
-            background: transparent;
-            cursor: pointer;
-            display: inline-flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            gap: 6px;
-            padding: 0;
-        }
-
-        .hamburger-button span {
-            display: block;
-            width: 20px;
-            height: 2px;
-            background: #0c2e49;
-            border-radius: 4px;
-        }
-
-        .hamburger-menu {
-            position: absolute;
-            top: 48px;
-            left: 0;
-            background: white;
-            color: #0c2e49;
-            border-radius: 8px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-            overflow: hidden;
-            min-width: 180px;
-            transform-origin: top left;
-            transform: scale(0.95);
-            opacity: 0;
-            pointer-events: none;
-            transition: all 0.2s ease;
-            z-index: 10;
-        }
-
-        .hamburger-menu.open {
-            transform: scale(1);
-            opacity: 1;
-            pointer-events: auto;
-        }
-
-        .hamburger-menu a,
-        .hamburger-menu button {
-            display: block;
-            padding: 12px 16px;
-            border-bottom: 1px solid #f0f0f0;
-            color: inherit;
-            font-size: 14px;
-            text-decoration: none;
-            background: transparent;
-            border: none;
-            text-align: left;
-            width: 100%;
-            cursor: pointer;
-        }
-
-        .hamburger-lang {
-            display: flex;
-            gap: 6px;
-            padding: 8px 16px;
-            justify-content: space-between;
-        }
-
-        .theme-toggle {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-        }
-
-        .theme-toggle i {
-            font-size: 18px;
-            line-height: 1;
-        }
-
-        .hamburger-menu-inner {
-            padding-bottom: 8px;
-        }
-
         body.dark {
             background: #0f141b;
             color: #e6edf3;
-        }
-
-        body.dark .top-bar {
-            background: #121a24;
-            border-bottom-color: #2a3b52;
-            color: #e6edf3;
-        }
-
-        body.dark .top-bar-center .title-main,
-        body.dark .top-bar-copy span,
-        body.dark .top-bar-copy strong {
-            color: #e6edf3;
-        }
-
-        body.dark .top-bar-center .title-sub {
-            color: #9aa7b5;
-        }
-
-        body.dark .top-bar-right img {
-            filter: brightness(1.6) contrast(1.1);
-        }
-
-        body.dark .hamburger-button {
-            border-color: #2a3b52;
-        }
-
-        body.dark .hamburger-button span {
-            background: #e6edf3;
-        }
-
-        body.dark .hamburger-menu {
-            background: #18212d;
-            color: #e6edf3;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-        }
-
-        body.dark .hamburger-menu a,
-        body.dark .hamburger-menu button {
-            border-bottom: 1px solid #243244;
-        }
-
-        body.dark .lang-toggle {
-            color: #9aa7b5;
-        }
-
-        body.dark .lang-toggle.active {
-            background: #2a62b8;
-            color: #fff;
         }
 
         body.dark .protocol-adherence,
@@ -535,251 +311,18 @@
             color: #9aa7b5;
         }
 
-        .modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(15, 20, 27, 0.55);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.2s ease;
-            z-index: 1000;
-        }
-
-        .modal-overlay.active {
-            opacity: 1;
-            pointer-events: auto;
-        }
-
-        .modal-card {
-            background: #fff;
-            color: #2c3e50;
-            border-radius: 12px;
-            padding: 20px 22px;
-            max-width: 420px;
-            width: calc(100% - 32px);
-            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
-        }
-
-        .modal-card h3 {
-            margin-bottom: 8px;
-            font-size: 18px;
-        }
-
-        .modal-card ul {
-            padding-left: 18px;
-            margin: 12px 0 16px;
-        }
-
-        .modal-card li {
-            margin-bottom: 6px;
-            font-size: 14px;
-        }
-
-        .modal-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            margin-top: 14px;
-        }
-
-        .modal-close {
-            border: none;
-            background: #1f4b99;
-            color: #fff;
-            padding: 8px 14px;
-            border-radius: 8px;
-            font-size: 13px;
-            cursor: pointer;
-        }
-
-        .modal-secondary {
-            border: 1px solid #c9d6ea;
-            background: transparent;
-            color: #1f4b99;
-        }
-
-        .modal-input {
-            width: 100%;
-            padding: 10px 12px;
-            border-radius: 8px;
-            border: 1px solid #d7dde4;
-            margin-top: 10px;
-            font-size: 14px;
-        }
-
-        body.dark .modal-card {
-            background: #141c26;
-            color: #e6edf3;
-        }
-
-        body.dark .modal-close {
-            background: #4e85e9;
-            color: #0b1320;
-        }
-
-        body.dark .modal-secondary {
-            border-color: #3a4a61;
-            color: #cfe0ff;
-        }
-
-        body.dark .modal-input {
-            background: #0f141b;
-            border-color: #2a3b52;
-            color: #e6edf3;
-        }
-
-        .databank-item {
-            display: inline-flex;
-            align-items: center;
-            padding: 6px 10px;
-            border-radius: 999px;
-            border: 1px solid #d7dde4;
-            background: #f8f9fb;
-            font-size: 12px;
-            color: #2c3e50;
-            transition: all 0.2s ease;
-        }
-
-        .databank-item:hover {
-            border-color: #4e85e9;
-            color: #1f4b99;
-            background: #eef4ff;
-        }
-
-        .databank-item.active {
-            background: #0c2e49;
-            border-color: #0c2e49;
-            color: #fff;
-        }
-
-        .databank-create {
-            width: 100%;
-            padding: 10px 12px;
-            border-radius: 10px;
-            border: 1px dashed #4e85e9;
-            background: #f5f9ff;
-            color: #1f4b99;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .databank-create:hover {
-            background: #e6f0ff;
-            border-color: #2f6fe0;
-        }
-
-        .hamburger-section-title {
-            padding: 10px 16px;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: #7f8c8d;
-            background: #f5f7fa;
-            border-bottom: 1px solid #f0f0f0;
-        }
-
-        .hamburger-databanks {
-            padding: 10px 12px 14px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        body.dark .databank-item {
-            background: #0f141b;
-            border-color: #2a3b52;
-            color: #e6edf3;
-        }
-
-        body.dark .databank-item:hover {
-            border-color: #4e85e9;
-            color: #cfe0ff;
-            background: #18263a;
-        }
-
-        body.dark .databank-item.active {
-            background: #4e85e9;
-            border-color: #4e85e9;
-            color: #0b1320;
-        }
-
-        body.dark .databank-create {
-            background: #152235;
-            border-color: #4e85e9;
-            color: #cfe0ff;
-        }
-
-        body.dark .databank-create:hover {
-            background: #1b2a40;
-        }
-
-        body.dark .hamburger-section-title {
-            color: #9aa7b5;
-            background: #121a24;
-            border-bottom-color: #243244;
-        }
     </style>
+    {% include "partials/top_bar/styles.html" %}
+    {% include "partials/create_databank_styles.html" %}
 </head>
 <body>
-    <div class="top-bar">
-        <div class="top-bar-left">
-            <div class="hamburger-wrapper">
-                <button id="top-dashboard-hamburger" class="hamburger-button" aria-label="Open menu" aria-expanded="false" aria-controls="top-dashboard-menu">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </button>
-                <div id="top-dashboard-menu" class="hamburger-menu">
-                    <div class="hamburger-menu-inner">
-                        <a href="/?db={{ db_name }}&lang={{ lang }}">{{ t.back_to_studies or 'Back to Studies' }}</a>
-                        <a href="/dashboard?db={{ db_name }}&lang={{ lang }}">{{ t.dashboard or 'Dashboard' }}</a>
-                        <button
-                            type="button"
-                            id="theme-toggle"
-                            class="theme-toggle"
-                            data-dark="{{ t.dark_mode }}"
-                            data-light="{{ t.light_mode }}"
-                            data-dark-icon="ph-moon"
-                            data-light-icon="ph-sun"
-                            aria-label="{{ t.dark_mode }}"
-                            title="{{ t.dark_mode }}"
-                        ><i class="ph ph-moon" aria-hidden="true"></i></button>
-                    </div>
-                    <div class="hamburger-lang">
-                        <a href="/dashboard?db={{ db_name }}&lang=en" class="lang-toggle {% if lang == 'en' %}active{% endif %}">EN</a>
-                        <a href="/dashboard?db={{ db_name }}&lang=de" class="lang-toggle {% if lang == 'de' %}active{% endif %}">DE</a>
-                    </div>
-                    <div class="hamburger-section-title">Databanks</div>
-                    <div class="hamburger-databanks">
-                        {% if databanks %}
-                            {% for bank in databanks %}
-                            <a href="/dashboard?db={{ bank }}&lang={{ lang }}" class="databank-item {% if bank == db_name %}active{% endif %}">{{ bank }}</a>
-                            {% endfor %}
-                        {% else %}
-                            <span class="subtitle">No databanks found in Databanks/</span>
-                        {% endif %}
-                        <button type="button" class="databank-create" onclick="createDatabank();">Create databank</button>
-                    </div>
-                </div>
-            </div>
-            <div class="top-bar-copy">
-                <span>{{ t.top_bar_primary }}</span>
-                <strong>{{ t.top_bar_secondary }}</strong>
-            </div>
-        </div>
-        <div class="top-bar-center">
-            <span class="title-main">DICOM Metadata Browser</span>
-            <span class="title-sub">{{ t.dashboard_title or 'Analytics Dashboard' }}</span>
-        </div>
-        <div class="top-bar-right">
-            <img src="{{ url_for('tum_logo') }}" alt="TUM Logo">
-        </div>
-    </div>
+    {% from "partials/top_bar/top_bar.html" import render_top_bar %}
+    {% set lang_url_template = '/dashboard?db=' ~ db_name ~ '&lang=%s' %}
+    {% set databank_url_template = '/dashboard?db=%s&lang=%s' %}
+    {% call render_top_bar('top-dashboard-hamburger', 'top-dashboard-menu', (t.dashboard_title or 'Analytics Dashboard'), lang_url_template, databank_url_template, t, lang, db_name, databanks) %}
+        <a href="/?db={{ db_name }}&lang={{ lang }}">{{ t.back_to_studies or 'Back to Studies' }}</a>
+        <a href="/dashboard?db={{ db_name }}&lang={{ lang }}">{{ t.dashboard or 'Dashboard' }}</a>
+    {% endcall %}
     <div class="container">
         <!-- Protocol Adherence Overview -->
         <div class="protocol-adherence">
@@ -1309,100 +852,32 @@
         </div>
     </div>
 
-    <div id="qa-score-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-hidden="true">
-        <div class="modal-card">
-            <h3>{{ t.qa_score_distribution or 'QA Score Distribution' }}</h3>
-            <p>{{ t.qa_score_help or 'QA (Quality Assurance) score is 0-5 based on the representative series:' }}</p>
-            <ul>
-                <li>{{ t.patient_weight or 'Patient weight' }}: {{ t.present or 'present' }}</li>
-                <li>{{ t.injected_activity or 'Injected activity' }}: {{ t.present or 'present' }}</li>
-                <li>{{ t.uptake_time_adherence or 'Uptake time' }}: {{ t.ok_or_too_long or 'status ok or too_long' }}</li>
-                <li>{{ t.timing_integrity or 'Timing integrity' }}: {{ t.no_time_conflict or 'status ok and no time conflict' }}</li>
-                <li>{{ t.recon_consistency or 'CSA fingerprint' }}: {{ t.matches_majority or 'matches majority fingerprint' }}</li>
-            </ul>
-            <div class="modal-actions">
-                <button class="modal-close" type="button" onclick="closeQaScoreHelp()">
-                    {{ t.close or 'Close' }}
-                </button>
-            </div>
+    {% from "partials/modals/modal.html" import modal_wrapper %}
+    {% call modal_wrapper("qa-score-modal", t.qa_score_distribution or 'QA Score Distribution') %}
+        <p>{{ t.qa_score_help or 'QA (Quality Assurance) score is 0-5 based on the representative series:' }}</p>
+        <ul>
+            <li>{{ t.patient_weight or 'Patient weight' }}: {{ t.present or 'present' }}</li>
+            <li>{{ t.injected_activity or 'Injected activity' }}: {{ t.present or 'present' }}</li>
+            <li>{{ t.uptake_time_adherence or 'Uptake time' }}: {{ t.ok_or_too_long or 'status ok or too_long' }}</li>
+            <li>{{ t.timing_integrity or 'Timing integrity' }}: {{ t.no_time_conflict or 'status ok and no time conflict' }}</li>
+            <li>{{ t.recon_consistency or 'CSA fingerprint' }}: {{ t.matches_majority or 'matches majority fingerprint' }}</li>
+        </ul>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeQaScoreHelp()">
+                {{ t.close or 'Close' }}
+            </button>
         </div>
-    </div>
+    {% endcall %}
 
-    <div id="create-db-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-hidden="true">
-        <div class="modal-card">
-            <h3>{{ t.create_databank or 'Create Databank' }}</h3>
-            <p>{{ t.create_databank_hint or 'Enter a name for the new databank.' }}</p>
-            <input id="create-db-name" class="modal-input" type="text" placeholder="{{ t.databank_name or 'Databank name' }}">
-            <div class="modal-actions">
-                <button class="modal-close modal-secondary" type="button" onclick="closeCreateDb()">
-                    {{ t.cancel or 'Cancel' }}
-                </button>
-                <button class="modal-close" type="button" onclick="submitCreateDb()">
-                    {{ t.create or 'Create' }}
-                </button>
-            </div>
-        </div>
-    </div>
+    {% include "partials/create_databank_modal.html" %}
+
+    {% set menu_button_id = 'top-dashboard-hamburger' %}
+    {% set menu_id = 'top-dashboard-menu' %}
+    {% set reload_on_theme_change = true %}
+    {% include "partials/top_bar/scripts.html" %}
     
     <script>
-        const storedTheme = localStorage.getItem('theme') || 'light';
-        const isDarkTheme = storedTheme === 'dark';
-        document.body.classList.toggle('dark', isDarkTheme);
-
-        const chartTheme = {
-            text: isDarkTheme ? '#e6edf3' : '#2c3e50',
-            grid: isDarkTheme ? '#243244' : '#ddd',
-            blueFill: isDarkTheme ? 'rgba(86, 173, 255, 0.6)' : 'rgba(52, 152, 219, 0.6)',
-            blueBorder: isDarkTheme ? 'rgba(86, 173, 255, 1)' : 'rgba(52, 152, 219, 1)',
-            orangeFill: isDarkTheme ? 'rgba(243, 156, 18, 0.7)' : 'rgba(230, 126, 34, 0.6)',
-            orangeBorder: isDarkTheme ? 'rgba(243, 156, 18, 1)' : 'rgba(230, 126, 34, 1)',
-            greenLine: 'rgba(39, 174, 96, 1)',
-            tooltipBg: isDarkTheme ? '#1e2936' : 'rgba(0, 0, 0, 0.8)',
-            tooltipText: isDarkTheme ? '#e6edf3' : '#f8f9fa'
-        };
-
-        function getBinWidth(labels) {
-            if (!labels || labels.length < 2) {
-                return null;
-            }
-            const first = parseFloat(labels[0]);
-            const second = parseFloat(labels[1]);
-            if (Number.isNaN(first) || Number.isNaN(second)) {
-                return null;
-            }
-            return Math.abs(second - first);
-        }
-
-        function getLabelPrecision(labels) {
-            if (!labels || !labels.length) {
-                return 0;
-            }
-            const sample = labels.find((label) => label.includes('.')) || labels[0];
-            const dotIndex = sample.indexOf('.');
-            if (dotIndex === -1) {
-                return 0;
-            }
-            return sample.length - dotIndex - 1;
-        }
-
-        function formatWithPrecision(value, labels) {
-            const precision = getLabelPrecision(labels);
-            return value.toFixed(precision);
-        }
-
-        function buildIndexUrl(params) {
-            const urlParams = new URLSearchParams(window.location.search);
-            urlParams.set('db', '{{ db_name }}');
-            urlParams.set('lang', '{{ lang }}');
-            Object.entries(params).forEach(([key, value]) => {
-                if (value === null || value === undefined || value === '') {
-                    urlParams.delete(key);
-                } else {
-                    urlParams.set(key, value);
-                }
-            });
-            return `/?${urlParams.toString()}`;
-        }
+        {% include "partials/charts/helpers.html" %}
 
         function showQaScoreHelp() {
             const modal = document.getElementById('qa-score-modal');
@@ -1420,64 +895,6 @@
             }
             modal.classList.remove('active');
             modal.setAttribute('aria-hidden', 'true');
-        }
-
-        function createBarChart(ctx, labels, values, options) {
-            return new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels,
-                    datasets: [{
-                        data: values,
-                        backgroundColor: options.fill || chartTheme.blueFill,
-                        borderColor: options.border || chartTheme.blueBorder,
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                color: chartTheme.text
-                            },
-                            grid: {
-                                color: chartTheme.grid
-                            },
-                            title: options.yTitle ? {
-                                display: true,
-                                text: options.yTitle,
-                                color: chartTheme.text
-                            } : undefined
-                        },
-                        x: {
-                            ticks: {
-                                color: chartTheme.text
-                            },
-                            grid: {
-                                color: chartTheme.grid
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            backgroundColor: chartTheme.tooltipBg,
-                            titleColor: chartTheme.tooltipText,
-                            bodyColor: chartTheme.tooltipText,
-                            callbacks: {
-                                title: function() {
-                                    return '';
-                                }
-                            }
-                        }
-                    }
-                }
-            });
         }
 
         // Uptake Time Chart
@@ -1808,115 +1225,7 @@
         }
     </script>
     <script>
-        const topMenuButton = document.getElementById('top-dashboard-hamburger');
-        const topMenu = document.getElementById('top-dashboard-menu');
-        const themeToggleButton = document.getElementById('theme-toggle');
         const qaScoreModal = document.getElementById('qa-score-modal');
-        const createDbModal = document.getElementById('create-db-modal');
-
-        function createDatabank() {
-            const modal = document.getElementById('create-db-modal');
-            const input = document.getElementById('create-db-name');
-            if (!modal || !input) {
-                return;
-            }
-            modal.classList.add('active');
-            modal.setAttribute('aria-hidden', 'false');
-            input.value = '';
-            setTimeout(() => input.focus(), 0);
-        }
-
-        function closeCreateDb() {
-            const modal = document.getElementById('create-db-modal');
-            if (!modal) {
-                return;
-            }
-            modal.classList.remove('active');
-            modal.setAttribute('aria-hidden', 'true');
-        }
-
-        function submitCreateDb() {
-            const input = document.getElementById('create-db-name');
-            const name = input ? input.value.trim() : '';
-            if (!name) {
-                return;
-            }
-            const formData = new FormData();
-            formData.append('name', name);
-            fetch('/databanks/create', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    const target = `/?db=${encodeURIComponent(data.name)}&lang={{ lang }}`;
-                    window.location.href = target;
-                } else {
-                    alert(data.message || 'Failed to create databank.');
-                }
-            })
-            .catch(error => {
-                alert(error.message || 'Failed to create databank.');
-            })
-            .finally(() => {
-                closeCreateDb();
-            });
-            if (topMenuButton && topMenu) {
-                topMenuButton.setAttribute('aria-expanded', 'false');
-                topMenu.classList.remove('open');
-            }
-        }
-
-        if (topMenuButton && topMenu) {
-            topMenuButton.addEventListener('click', (event) => {
-                event.stopPropagation();
-                const expanded = topMenuButton.getAttribute('aria-expanded') === 'true';
-                topMenuButton.setAttribute('aria-expanded', String(!expanded));
-                topMenu.classList.toggle('open', !expanded);
-            });
-
-            document.addEventListener('click', (event) => {
-                if (!topMenu.contains(event.target) && !topMenuButton.contains(event.target)) {
-                    topMenuButton.setAttribute('aria-expanded', 'false');
-                    topMenu.classList.remove('open');
-                }
-            });
-        }
-
-        function closeTopDashboardMenu() {
-            if (topMenuButton && topMenu) {
-                topMenuButton.setAttribute('aria-expanded', 'false');
-                topMenu.classList.remove('open');
-            }
-        }
-
-        function applyTheme(theme) {
-            const isDark = theme === 'dark';
-            document.body.classList.toggle('dark', isDark);
-            if (themeToggleButton) {
-                const nextLabel = isDark
-                    ? (themeToggleButton.dataset.light || 'Light Mode')
-                    : (themeToggleButton.dataset.dark || 'Dark Mode');
-                const nextIcon = isDark
-                    ? (themeToggleButton.dataset.lightIcon || 'ph-sun')
-                    : (themeToggleButton.dataset.darkIcon || 'ph-moon');
-                themeToggleButton.innerHTML = `<i class="ph ${nextIcon}" aria-hidden="true"></i>`;
-                themeToggleButton.setAttribute('aria-label', nextLabel);
-                themeToggleButton.setAttribute('title', nextLabel);
-            }
-        }
-
-        if (themeToggleButton) {
-            themeToggleButton.addEventListener('click', () => {
-                const nextTheme = document.body.classList.contains('dark') ? 'light' : 'dark';
-                localStorage.setItem('theme', nextTheme);
-                closeTopDashboardMenu();
-                window.location.reload();
-            });
-        }
-
-        applyTheme(storedTheme);
 
         if (qaScoreModal) {
             qaScoreModal.addEventListener('click', (event) => {
@@ -1925,14 +1234,7 @@
                 }
             });
         }
-
-        if (createDbModal) {
-            createDbModal.addEventListener('click', (event) => {
-                if (event.target === createDbModal) {
-                    closeCreateDb();
-                }
-            });
-        }
     </script>
+    {% include "partials/create_databank_script.html" %}
 </body>
 </html>

@@ -1,0 +1,11 @@
+<div class="hamburger-section-title">{{ t.databanks or 'Databanks' }}</div>
+<div class="hamburger-databanks">
+    {% if databanks %}
+        {% for bank in databanks %}
+        <a href="{{ databank_url_template|format(bank, lang) }}" class="databank-item {% if bank == db_name %}active{% endif %}">{{ bank }}</a>
+        {% endfor %}
+    {% else %}
+        <span class="subtitle">No databanks found in Databanks/</span>
+    {% endif %}
+    <button type="button" class="databank-create" onclick="createDatabank();">{{ t.create_databank or 'Create Databank' }}</button>
+</div>

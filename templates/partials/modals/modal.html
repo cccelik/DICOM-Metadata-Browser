@@ -1,0 +1,8 @@
+{% macro modal_wrapper(modal_id, title) %}
+<div id="{{ modal_id }}" class="modal-overlay" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-card">
+        <h3>{{ title }}</h3>
+        {{ caller() }}
+    </div>
+</div>
+{% endmacro %}

@@ -1,0 +1,198 @@
+<style>
+    .export-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 20, 27, 0.55);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 50;
+    }
+
+    .export-modal.open {
+        display: flex;
+    }
+
+    .export-modal-content {
+        background: #fff;
+        border-radius: 12px;
+        width: min(960px, 95vw);
+        max-height: 85vh;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 18px 45px rgba(0, 0, 0, 0.25);
+    }
+
+    .export-modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 18px 22px;
+        border-bottom: 1px solid #ecf0f1;
+    }
+
+    .export-modal-header h3 {
+        font-size: 18px;
+        color: #2c3e50;
+    }
+
+    .export-modal-close {
+        border: none;
+        background: transparent;
+        font-size: 22px;
+        cursor: pointer;
+        color: #7f8c8d;
+    }
+
+    .export-modal-body {
+        padding: 18px 22px;
+        overflow-y: auto;
+    }
+
+    .export-modal-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+    }
+
+    .export-action-group {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .export-small-button {
+        border: 1px solid #d7dde4;
+        background: #f8f9fb;
+        color: #2c3e50;
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .export-small-button:hover {
+        border-color: #4e85e9;
+        color: #1f4b99;
+        background: #eef4ff;
+    }
+
+    .export-sections {
+        display: grid;
+        gap: 14px;
+    }
+
+    .export-section {
+        border: 1px solid #e6ebf2;
+        border-radius: 10px;
+        padding: 14px;
+        background: #fdfdff;
+    }
+
+    .export-section-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+        font-size: 14px;
+        color: #2c3e50;
+        font-weight: 600;
+    }
+
+    .export-field-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 8px 14px;
+    }
+
+    .export-field {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: #2c3e50;
+    }
+
+    .export-modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 16px 22px;
+        border-top: 1px solid #ecf0f1;
+        background: #f8f9fb;
+    }
+
+    .export-primary {
+        background: #4e85e9;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 10px 18px;
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+    .export-secondary {
+        background: transparent;
+        color: #2c3e50;
+        border: 1px solid #d7dde4;
+        border-radius: 6px;
+        padding: 10px 16px;
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+    body.dark .export-modal-content {
+        background: #141c26;
+        color: #e6edf3;
+        border: 1px solid #243244;
+    }
+
+    body.dark .export-modal-header {
+        border-bottom-color: #243244;
+    }
+
+    body.dark .export-modal-header h3 {
+        color: #e6edf3;
+    }
+
+    body.dark .export-modal-close {
+        color: #9aa7b5;
+    }
+
+    body.dark .export-section {
+        background: #101922;
+        border-color: #243244;
+    }
+
+    body.dark .export-section-header,
+    body.dark .export-field {
+        color: #e6edf3;
+    }
+
+    body.dark .export-small-button {
+        background: #18263a;
+        border-color: #2a3b52;
+        color: #cfe0ff;
+    }
+
+    body.dark .export-small-button:hover {
+        background: #1c2d43;
+        border-color: #4e85e9;
+        color: #fff;
+    }
+
+    body.dark .export-modal-footer {
+        border-top-color: #243244;
+        background: #0f141b;
+    }
+
+    body.dark .export-secondary {
+        border-color: #2a3b52;
+        color: #e6edf3;
+    }
+</style>
