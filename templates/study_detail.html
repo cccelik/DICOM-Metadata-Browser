@@ -581,6 +581,7 @@
                             <th>{{ t.modality }}</th>
                             <th>{{ t.injection_time }}</th>
                             <th>{{ t.acquisition_datetime }}</th>
+                            <th>{{ t.series_time }}</th>
                             <th>{{ t.injection_delay }}</th>
                             <th>{{ t.manufacturer }}</th>
                             <th>{{ t.details }}</th>
@@ -635,6 +636,15 @@
                                 {% endif %}
                             </td>
                             <td>
+                                {% if s.series_time_formatted %}
+                                    {{ s.series_time_formatted }}
+                                {% elif s.series_time %}
+                                    {{ s.series_time }}
+                                {% else %}
+                                    <span style="color: #bdc3c7;">N/A</span>
+                                {% endif %}
+                            </td>
+                            <td>
                                 {% if s.injection_delay %}
                                     <span style="color: #3498db; font-weight: 500;">{{ s.injection_delay }}</span>
                                 {% else %}
@@ -658,7 +668,7 @@
                             </td>
                         </tr>
                         <tr id="series-{{ loop.index }}" style="display: none;">
-                            <td colspan="8">
+                            <td colspan="9">
                                 <div class="detail-panel">
                                     {% set has_nm = s.radiopharmaceutical or s.injected_activity or s.decay_correction or s.activity_at_scan or s.activity_per_kg or s.radiopharmaceutical_volume or s.radionuclide_total_dose or s.pet_dose_report %}
                                     {% set has_private_details = s.csa_image_header_json or s.csa_series_header_json or s.csa_image_header_hash or s.csa_series_header_hash or s.private_payload_fingerprint or (s.private_creators and s.private_creators|length) or (s.pipeline_provenance and s.pipeline_provenance|length) or (s.rt_provenance and s.rt_provenance|length) %}

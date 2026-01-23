@@ -292,6 +292,10 @@
             gap: 12px;
         }
 
+        .card-title-row h2 {
+            flex: 1;
+        }
+
         .info-button {
             border: none;
             background: transparent;
@@ -372,7 +376,12 @@
             <!-- Uptake Time Distribution -->
             {% if stats.uptake_time.count > 0 %}
             <div class="card">
-                <h2>{{ t.uptake_time_distribution or 'Injection-to-Scan Time Distribution' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.uptake_time_distribution or 'Injection-to-Scan Time Distribution' }}</h2>
+                    <button class="info-button" type="button" aria-label="About injection-to-scan time distribution" title="About injection-to-scan time distribution" onclick="showInfoModal('uptake-time-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <div class="stat-grid">
                     <div class="stat-box">
                         <div class="stat-value ideal-value">{{ "%.1f"|format(stats.uptake_time.ideal) }}</div>
@@ -406,7 +415,12 @@
             <!-- Dose per kg Distribution -->
             {% if stats.dose_per_kg.count > 0 %}
             <div class="card">
-                <h2>{{ t.dose_distribution or 'Injected Dose per kg Distribution' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.dose_distribution or 'Injected Dose per kg Distribution' }}</h2>
+                    <button class="info-button" type="button" aria-label="About injected dose per kg distribution" title="About injected dose per kg distribution" onclick="showInfoModal('dose-distribution-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <div class="stat-grid">
                     <div class="stat-box">
                         <div class="stat-value ideal-value">{{ "%.1f"|format(stats.dose_per_kg.ideal) }}</div>
@@ -443,7 +457,12 @@
             <!-- Radiopharmaceuticals -->
             {% if stats.radiopharmaceuticals %}
             <div class="card">
-                <h2>{{ t.radiopharmaceuticals or 'Radiopharmaceuticals' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.radiopharmaceuticals or 'Radiopharmaceuticals' }}</h2>
+                    <button class="info-button" type="button" aria-label="About radiopharmaceutical counts" title="About radiopharmaceutical counts" onclick="showInfoModal('radiopharmaceuticals-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <table>
                     <thead>
                         <tr>
@@ -466,7 +485,12 @@
             <!-- Manufacturers -->
             {% if stats.manufacturers %}
             <div class="card">
-                <h2>{{ t.manufacturers or 'Manufacturers' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.manufacturers or 'Manufacturers' }}</h2>
+                    <button class="info-button" type="button" aria-label="About manufacturer counts" title="About manufacturer counts" onclick="showInfoModal('manufacturers-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <table>
                     <thead>
                         <tr>
@@ -491,7 +515,12 @@
 
         <div class="dashboard-grid">
             <div class="card">
-                <h2>{{ t.demographics or 'Demographics' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.demographics or 'Demographics' }}</h2>
+                    <button class="info-button" type="button" aria-label="About demographics" title="About demographics" onclick="showInfoModal('demographics-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <table>
                     <thead>
                         <tr>
@@ -527,7 +556,12 @@
             </div>
 
             <div class="card">
-                <h2>{{ t.throughput or 'Throughput & Timing' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.throughput or 'Throughput & Timing' }}</h2>
+                    <button class="info-button" type="button" aria-label="About throughput and timing" title="About throughput and timing" onclick="showInfoModal('throughput-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <table>
                     <thead>
                         <tr>
@@ -550,7 +584,12 @@
         <!-- QA Dashboard -->
         <div class="dashboard-grid">
             <div class="card">
-                <h2>{{ t.metadata_completeness or 'Metadata Completeness' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.metadata_completeness or 'Metadata Completeness' }}</h2>
+                    <button class="info-button" type="button" aria-label="About metadata completeness" title="About metadata completeness" onclick="showInfoModal('metadata-completeness-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 {% set total_series = completeness_stats.total %}
                 {% set counts = completeness_stats.counts %}
                 {% set totals = completeness_stats.totals if completeness_stats.totals else {} %}
@@ -594,7 +633,12 @@
 
         <div class="dashboard-grid">
             <div class="card">
-                <h2>{{ t.timing_integrity or 'Timing Integrity' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.timing_integrity or 'Timing Integrity' }}</h2>
+                    <button class="info-button" type="button" aria-label="About timing integrity checks" title="About timing integrity checks" onclick="showInfoModal('timing-integrity-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <div class="chart-container compact">
                     <canvas id="timingIntegrityChart"></canvas>
                 </div>
@@ -632,7 +676,12 @@
             </div>
 
             <div class="card">
-                <h2>{{ t.dose_plausibility or 'Dose Plausibility' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.dose_plausibility or 'Dose Plausibility' }}</h2>
+                    <button class="info-button" type="button" aria-label="About dose plausibility checks" title="About dose plausibility checks" onclick="showInfoModal('dose-plausibility-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <div class="chart-container compact">
                     <canvas id="dosePlausibilityChart"></canvas>
                 </div>
@@ -672,7 +721,12 @@
 
         <div class="dashboard-grid">
             <div class="card">
-                <h2>{{ t.scanner_landscape or 'Scanner Landscape' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.scanner_landscape or 'Scanner Landscape' }}</h2>
+                    <button class="info-button" type="button" aria-label="About scanner landscape" title="About scanner landscape" onclick="showInfoModal('scanner-landscape-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <table>
                     <thead>
                         <tr>
@@ -698,7 +752,12 @@
             </div>
 
             <div class="card">
-                <h2>{{ t.protocol_radiopharm or 'Protocol × Radiopharmaceutical' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.protocol_radiopharm or 'Protocol × Radiopharmaceutical' }}</h2>
+                    <button class="info-button" type="button" aria-label="About protocol and radiopharmaceutical summary" title="About protocol and radiopharmaceutical summary" onclick="showInfoModal('protocol-radiopharm-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <table>
                     <thead>
                         <tr>
@@ -724,7 +783,12 @@
 
         <div class="dashboard-grid">
             <div class="card">
-                <h2>{{ t.derived_objects_qa or 'Derived Objects QA' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.derived_objects_qa or 'Derived Objects QA' }}</h2>
+                    <button class="info-button" type="button" aria-label="About derived objects QA" title="About derived objects QA" onclick="showInfoModal('derived-objects-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <div class="stat-grid">
                     <div class="stat-box">
                         <div class="stat-value">{{ derived_stats.seg }}</div>
@@ -764,7 +828,12 @@
             </div>
 
             <div class="card">
-                <h2>{{ t.duplicates_or_collisions or 'Duplicates & Collisions' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.duplicates_or_collisions or 'Duplicates & Collisions' }}</h2>
+                    <button class="info-button" type="button" aria-label="About duplicates and collisions" title="About duplicates and collisions" onclick="showInfoModal('duplicates-collisions-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <table>
                     <thead>
                         <tr>
@@ -788,7 +857,12 @@
 
         <div class="dashboard-grid">
             <div class="card">
-                <h2>{{ t.study_composition or 'Study Composition' }}</h2>
+                <div class="card-title-row">
+                    <h2>{{ t.study_composition or 'Study Composition' }}</h2>
+                    <button class="info-button" type="button" aria-label="About study composition checks" title="About study composition checks" onclick="showInfoModal('study-composition-modal')">
+                        <i class="ph ph-info" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <div class="chart-container compact">
                     <canvas id="studyCompositionChart"></canvas>
                 </div>
@@ -869,6 +943,151 @@
         </div>
     {% endcall %}
 
+    {% call modal_wrapper("uptake-time-modal", t.uptake_time_distribution or 'Injection-to-Scan Time Distribution') %}
+        <p>Histogram of injection-to-scan time (minutes) computed from injection and acquisition timestamps on the representative series.</p>
+        <ul>
+            <li>Bins are clickable to filter studies in the main list.</li>
+            <li>Ideal/mean/median/std dev are shown above the chart.</li>
+        </ul>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('uptake-time-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("dose-distribution-modal", t.dose_distribution or 'Injected Dose per kg Distribution') %}
+        <p>Histogram of injected activity per kg (MBq/kg) computed from injected activity and patient weight on the representative series.</p>
+        <ul>
+            <li>Bins are clickable to filter studies in the main list.</li>
+            <li>Ideal/mean/median/std dev are shown above the chart.</li>
+        </ul>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('dose-distribution-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("radiopharmaceuticals-modal", t.radiopharmaceuticals or 'Radiopharmaceuticals') %}
+        <p>Counts of radiopharmaceutical names across series with a recorded value.</p>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('radiopharmaceuticals-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("manufacturers-modal", t.manufacturers or 'Manufacturers') %}
+        <p>Series counts by manufacturer with percentages of total series.</p>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('manufacturers-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("demographics-modal", t.demographics or 'Demographics') %}
+        <p>Patient sex and age buckets derived from available patient metadata.</p>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('demographics-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("throughput-modal", t.throughput or 'Throughput & Timing') %}
+        <p>Study counts by Study Time hour to show daily throughput patterns.</p>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('throughput-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("metadata-completeness-modal", t.metadata_completeness or 'Metadata Completeness') %}
+        <p>Percent of studies with key fields present on the representative series. Use "View missing" to filter.</p>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('metadata-completeness-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("timing-integrity-modal", t.timing_integrity or 'Timing Integrity') %}
+        <p>QA checks on injection/acquisition timing and timestamp parsing.</p>
+        <ul>
+            <li>Negative uptake time.</li>
+            <li>Uptake time &gt; 240 minutes.</li>
+            <li>Timestamp parse failures.</li>
+            <li>Study vs series time gap &gt; 120 minutes.</li>
+        </ul>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('timing-integrity-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("dose-plausibility-modal", t.dose_plausibility or 'Dose Plausibility') %}
+        <p>QA checks on injected dose values for radiopharmaceutical studies.</p>
+        <ul>
+            <li>Outliers &gt; 3 sigma based on MBq/kg.</li>
+            <li>Possible unit mismatch when MBq/kg is extreme.</li>
+            <li>Missing activity or weight when the other is present.</li>
+        </ul>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('dose-plausibility-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("scanner-landscape-modal", t.scanner_landscape or 'Scanner Landscape') %}
+        <p>Top scanner configurations by manufacturer/model/software with series counts and unique CSA fingerprints.</p>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('scanner-landscape-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("protocol-radiopharm-modal", t.protocol_radiopharm or 'Protocol × Radiopharmaceutical') %}
+        <p>Top protocol and radiopharmaceutical combinations with unique CSA fingerprints and counts.</p>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('protocol-radiopharm-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("derived-objects-modal", t.derived_objects_qa or 'Derived Objects QA') %}
+        <p>Counts of derived objects (SEG, RTSTRUCT, highdicom, QIICR) plus any CTP labels.</p>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('derived-objects-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("duplicates-collisions-modal", t.duplicates_or_collisions or 'Duplicates & Collisions') %}
+        <p>Potential duplicates detected by matching SOPInstanceUIDs or series signature hashes.</p>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('duplicates-collisions-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
+    {% call modal_wrapper("study-composition-modal", t.study_composition or 'Study Composition') %}
+        <p>Counts of studies missing CT/PT modalities or having more than 20 series.</p>
+        <div class="modal-actions">
+            <button class="modal-close" type="button" onclick="closeInfoModal('study-composition-modal')">
+                {{ t.close or 'Close' }}
+            </button>
+        </div>
+    {% endcall %}
+
     {% include "partials/create_databank_modal.html" %}
 
     {% set menu_button_id = 'top-dashboard-hamburger' %}
@@ -890,6 +1109,24 @@
 
         function closeQaScoreHelp() {
             const modal = document.getElementById('qa-score-modal');
+            if (!modal) {
+                return;
+            }
+            modal.classList.remove('active');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+
+        function showInfoModal(modalId) {
+            const modal = document.getElementById(modalId);
+            if (!modal) {
+                return;
+            }
+            modal.classList.add('active');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeInfoModal(modalId) {
+            const modal = document.getElementById(modalId);
             if (!modal) {
                 return;
             }
@@ -1234,6 +1471,35 @@
                 }
             });
         }
+
+        const infoModalIds = [
+            'uptake-time-modal',
+            'dose-distribution-modal',
+            'radiopharmaceuticals-modal',
+            'manufacturers-modal',
+            'demographics-modal',
+            'throughput-modal',
+            'metadata-completeness-modal',
+            'timing-integrity-modal',
+            'dose-plausibility-modal',
+            'scanner-landscape-modal',
+            'protocol-radiopharm-modal',
+            'derived-objects-modal',
+            'duplicates-collisions-modal',
+            'study-composition-modal'
+        ];
+
+        infoModalIds.forEach((modalId) => {
+            const modal = document.getElementById(modalId);
+            if (!modal) {
+                return;
+            }
+            modal.addEventListener('click', (event) => {
+                if (event.target === modal) {
+                    closeInfoModal(modalId);
+                }
+            });
+        });
     </script>
     {% include "partials/create_databank_script.html" %}
 </body>

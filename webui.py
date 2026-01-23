@@ -2778,10 +2778,11 @@ def parse_time_to_seconds(time_str):
             seconds = int(time_str[4:6])
             total_seconds = hours * 3600 + minutes * 60 + seconds
             
-            # Add fractional part if present
+            # Add fractional part if present (DICOM fractions are decimal, not whole seconds)
             if '.' in time_str:
-                frac = float(time_str.split('.', 1)[1])
-                total_seconds += frac
+                frac_str = time_str.split('.', 1)[1]
+                if frac_str:
+                    total_seconds += float("0." + frac_str)
             
             return total_seconds
     except Exception:
