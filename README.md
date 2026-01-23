@@ -1,6 +1,13 @@
 # DICOM Metadata Extractor
 
-Tooling to extract DICOM metadata into SQLite and browse it via a lightweight web UI.
+Tooling to extract DICOM metadata into SQLite and browse it via a lightweight web UI with QA analytics.
+
+## Working principles (high level)
+
+- **Representative series**: Each study has a representative series used for dashboards, filters, and QA metrics to avoid counting the same study multiple times.
+- **Private tag handling**: Private creators are resolved per file and private payloads are decoded conservatively (ASCII where possible, otherwise stored as raw/hex/length).
+- **Vendor CSA support (Siemens)**: CSA Image/Series headers are parsed into summaries and fingerprinted to support reconstruction consistency checks.
+- **QA-first metrics**: Dashboard cards highlight completeness, timing integrity, dose plausibility, and derived object provenance from representative series.
 
 ## Setup
 
@@ -85,6 +92,11 @@ Select a different database in the UI by URL parameter (name or file):
 http://127.0.0.1:5001/?db=another.db
 ```
 
+Upload via UI:
+
+- Use the hamburger menu → Upload to ingest ZIP/7Z archives directly.
+- Databanks can be created from any page via the Create Databank dialog.
+
 ### 3) Extract metadata as JSON (no database)
 
 Dump metadata to stdout:
@@ -112,5 +124,13 @@ python3 extract_metadata.py /path/to/dicom_dir -m 8 -t
 
 ## Notes
 
-- The main database table is `dicom_metadata`.
+- The main database table is `dicom_metadata` with related private tag tables.
+- Databanks live under `Databanks/` (name or path can be passed on CLI or via UI).
 - The CLI prevents duplicate series by `SeriesInstanceUID`, so re-processing is safe.
+
+## Key features (UI)
+
+- **Study list** with filters (uptake time, dose per kg, modality/manufacturer/radiopharm).
+- **Study details** with Nuclear Medicine summary, Private Tags (CSA summaries), and CSV export.
+- **Dashboard QA**: protocol adherence, distributions, metadata completeness, timing integrity, dose plausibility, derived object counts, and QA score distribution.
+- **Theme + language toggle** (EN/DE) across pages.
