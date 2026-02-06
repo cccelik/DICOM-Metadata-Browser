@@ -11,6 +11,7 @@ DB_SCHEMA = """
 CREATE TABLE IF NOT EXISTS dicom_metadata (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_path TEXT,
+    scan_root TEXT,
     
     -- Patient Information
     patient_id TEXT,
@@ -199,6 +200,7 @@ def init_database(db_path: str, optimize: bool = True):
     cursor = conn.execute("PRAGMA table_info(dicom_metadata)")
     existing_cols = {row[1] for row in cursor.fetchall()}
     migrations = [
+        ("scan_root", "TEXT"),
         ("ctp_collection", "TEXT"),
         ("ctp_subject_id", "TEXT"),
         ("ctp_private_flag_raw", "TEXT"),
@@ -245,13 +247,21 @@ def study_exists(conn: sqlite3.Connection, study_uid: str) -> bool:
     return count > 0
 
 
-def insert_metadata(conn: sqlite3.Connection, metadata: DICOMMetadata, file_path: str, skip_existing: bool = True, commit: bool = True):
+def insert_metadata(
+    conn: sqlite3.Connection,
+    metadata: DICOMMetadata,
+    file_path: str,
+    scan_root: str = None,
+    skip_existing: bool = True,
+    commit: bool = True
+):
     """Insert metadata into database
     
     Args:
         conn: Database connection
         metadata: DICOM metadata to insert
-        file_path: Path to the DICOM file
+        file_path: Path to the DICOM file (relative or absolute)
+        scan_root: Base directory used to resolve file_path (absolute if available)
         skip_existing: If True, skip if series already exists (prevents duplicates)
     
     Returns:
@@ -260,6 +270,8 @@ def insert_metadata(conn: sqlite3.Connection, metadata: DICOMMetadata, file_path
     data = metadata.to_dict()
     private_tags = data.pop("private_tags", [])
     data['file_path'] = file_path
+    if scan_root:
+        data['scan_root'] = scan_root
     
     columns = ', '.join(data.keys())
     placeholders = ', '.join(['?' for _ in data])

@@ -265,11 +265,31 @@
             overflow-wrap: anywhere;
             word-break: break-word;
         }
+
+        .scanner-landscape-table {
+            table-layout: auto;
+        }
+
+        .scanner-landscape-table th,
+        .scanner-landscape-table td {
+            font-size: 14px;
+            line-height: 1.2;
+            padding: 8px 10px;
+        }
+
+        .scanner-landscape-table th {
+            overflow-wrap: normal !important;
+            word-break: keep-all !important;
+            white-space: normal !important;
+        }
         
         table th {
             background: #f8f9fa;
             font-weight: 600;
             color: #2c3e50;
+            overflow-wrap: normal;
+            word-break: keep-all;
+            white-space: normal;
         }
         
         .badge {
@@ -463,7 +483,7 @@
                         <i class="ph ph-info" aria-hidden="true"></i>
                     </button>
                 </div>
-                <table>
+                <table class="scanner-landscape-table">
                     <thead>
                         <tr>
                             <th>{{ t.radiopharmaceutical or 'Radiopharmaceutical' }}</th>

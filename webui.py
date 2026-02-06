@@ -6,6 +6,8 @@ Clean Web UI for DICOM Metadata Browser
 from flask import Flask, render_template, request, jsonify, session, send_from_directory, Response
 import sqlite3
 import math
+import statistics
+from datetime import datetime
 from pathlib import Path
 import os
 import tempfile
@@ -577,7 +579,6 @@ def compute_delay_status(row_dict: dict) -> Tuple[Optional[float], str]:
         return None, "parse_fail"
 
     try:
-        from datetime import datetime
         inj_dt = datetime(
             int(inj_date_str[:4]), int(inj_date_str[4:6]), int(inj_date_str[6:8]),
             inj_time_parsed[0], inj_time_parsed[1], inj_time_parsed[2]
@@ -705,6 +706,25 @@ def load_representative_series(conn: sqlite3.Connection) -> Tuple[Dict[str, dict
     representative_map = select_study_representatives(series_rows)
     representative_series_rows = [entry["row"] for entry in representative_map.values()]
     return representative_map, representative_series_rows
+
+
+def resolve_display_path(scan_root: Optional[str], file_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not file_path:
+        return None, None
+    try:
+        path = Path(file_path)
+        if path.is_absolute():
+            return str(path), None
+    except Exception:
+        return None, None
+    if scan_root and scan_root.startswith("zip:"):
+        zip_name = scan_root.split("zip:", 1)[1]
+        display_path = str(Path(zip_name) / file_path)
+        label = f"Extracted from uploaded zip file: {zip_name}"
+        return display_path, label
+    if scan_root:
+        return str(Path(scan_root) / file_path), None
+    return None, None
 
 
 def fuzzy_match(text1, text2, threshold=0.6):
@@ -910,7 +930,6 @@ def index():
                     filtered_study_uids.add(entry["row"]["study_instance_uid"])
 
             if qa_filters:
-                import statistics
                 representative_series_rows = [entry["row"] for entry in representative_map.values()]
 
                 study_flags = {}
@@ -1178,20 +1197,7 @@ def index():
                 study['study_date_formatted'] = format_date(study['study_date'])
             if study.get('study_time'):
                 study['study_time_formatted'] = format_time(study['study_time'])
-            # Clean up patient name display (remove DICOM delimiter characters ^)
-            if study.get('patient_name'):
-                # DICOM PatientName format is often: Last^First^Middle^Prefix^Suffix
-                # For anonymized data like "Anonymous^00039^^^", show it cleaner
-                parts = study['patient_name'].split('^')
-                # If it's anonymized format (Anonymous^number), show it cleanly
-                if len(parts) >= 2 and parts[0].lower() == 'anonymous':
-                    study['patient_name_display'] = f"{parts[0]} {parts[1]}" if parts[1] else parts[0]
-                else:
-                    # Try to construct a readable name from parts
-                    name_parts = [p for p in parts if p]  # Remove empty parts
-                    study['patient_name_display'] = ' '.join(name_parts) if name_parts else study['patient_name']
-            else:
-                study['patient_name_display'] = None
+            study['patient_name_display'] = format_patient_name(study.get('patient_name')) or None
         
         return render_template(
             'index.html',
@@ -1304,23 +1310,8 @@ def study_detail(study_uid):
         
         study_info = dict(study_info)
         
-        # Get representative series for this study (one per modality).
+        # Get all series for this study (one row per series).
         cursor = conn.execute("""
-            WITH ranked AS (
-                SELECT
-                    s.*,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY s.modality
-                        ORDER BY
-                            COALESCE(s.number_of_slices, 0) DESC,
-                            s.series_time IS NULL,
-                            s.series_time ASC,
-                            s.series_number IS NULL,
-                            s.series_number ASC
-                    ) AS rn
-                FROM dicom_metadata s
-                WHERE s.study_instance_uid = ?
-            )
             SELECT 
                 series_instance_uid,
                 series_number,
@@ -1328,6 +1319,7 @@ def study_detail(study_uid):
                 series_date,
                 series_time,
                 modality,
+                scan_root,
                 body_part_examined,
                 protocol_name,
                 acquisition_date,
@@ -1370,11 +1362,33 @@ def study_detail(study_uid):
                 frame_time,
                 number_of_slices,
                 file_path
-            FROM ranked
-            WHERE rn = 1
-            ORDER BY series_number ASC, series_time ASC
+            FROM dicom_metadata
+            WHERE study_instance_uid = ?
+            ORDER BY series_number ASC, series_time ASC, series_instance_uid ASC
         """, (study_uid,))
         series = [dict(row) for row in cursor.fetchall()]
+        study_paths = set()
+        study_labels = set()
+        for s in series:
+            abs_path, path_label = resolve_display_path(s.get("scan_root"), s.get("file_path"))
+            if abs_path:
+                s["absolute_file_path"] = abs_path
+                study_paths.add(abs_path)
+            if path_label:
+                s["absolute_path_label"] = path_label
+                study_labels.add(path_label)
+        if study_paths:
+            try:
+                common_root = os.path.commonpath(sorted(study_paths))
+            except Exception:
+                common_root = None
+            if common_root:
+                study_info["study_absolute_paths"] = [common_root]
+            else:
+                study_info["study_absolute_paths"] = sorted(study_paths)
+        else:
+            study_info["study_absolute_paths"] = []
+        study_info["study_absolute_path_labels"] = sorted(study_labels)
         export_modalities = sorted({
             s.get('modality') for s in series if s.get('modality')
         })
@@ -1451,9 +1465,7 @@ def study_detail(study_uid):
                     pet_dose_reports[row["series_instance_uid"]] = entries
         
         conn.close()
-        
-        study_info = dict(study_info)
-        
+
         # Format dates and times
         if study_info.get('study_date'):
             study_info['study_date_formatted'] = format_date(study_info['study_date'])
@@ -1465,16 +1477,7 @@ def study_detail(study_uid):
         if study_info.get('patient_birth_date'):
             study_info['patient_birth_date_formatted'] = format_date(study_info['patient_birth_date'])
         
-        # Clean up patient name display (remove DICOM delimiter characters ^)
-        if study_info.get('patient_name'):
-            parts = study_info['patient_name'].split('^')
-            if len(parts) >= 2 and parts[0].lower() == 'anonymous':
-                study_info['patient_name_display'] = f"{parts[0]} {parts[1]}" if parts[1] else parts[0]
-            else:
-                name_parts = [p for p in parts if p]  # Remove empty parts
-                study_info['patient_name_display'] = ' '.join(name_parts) if name_parts else study_info['patient_name']
-        else:
-            study_info['patient_name_display'] = None
+        study_info['patient_name_display'] = format_patient_name(study_info.get('patient_name')) or None
         
         # Calculate derived metrics (removed study-level nuclear medicine calculations)
         # Note: Nuclear medicine information is now per-series (see series loop below)
@@ -1603,7 +1606,7 @@ def export_study_csv(study_uid):
     extra_fields = sorted(EXPORT_DERIVED_DEPENDENCIES) if derived_selected else []
     real_fields = [field for field in selected_fields if field not in EXPORT_DERIVED_FIELDS]
     select_fields = list(dict.fromkeys(real_fields + extra_fields))
-    select_exprs = [f"r.{field}" for field in select_fields] if select_fields else ["r.study_instance_uid"]
+    select_exprs = [f"s.{field}" for field in select_fields] if select_fields else ["s.study_instance_uid"]
     column_list = ", ".join(select_exprs)
     modality_filters = [m.strip() for m in request.args.getlist('modality') if m.strip()]
     modality_clause = ""
@@ -1614,24 +1617,9 @@ def export_study_csv(study_uid):
         params.extend(modality_filters)
     cursor = conn.execute(
         f"""
-        WITH ranked AS (
-            SELECT
-                s.*,
-                ROW_NUMBER() OVER (
-                    PARTITION BY s.modality
-                    ORDER BY
-                        COALESCE(s.number_of_slices, 0) DESC,
-                        s.series_time IS NULL,
-                        s.series_time ASC,
-                        s.series_number IS NULL,
-                        s.series_number ASC
-                ) AS rn
-            FROM dicom_metadata s
-            WHERE s.study_instance_uid = ?{modality_clause}
-        )
         SELECT {column_list}
-        FROM ranked r
-        WHERE r.rn = 1
+        FROM dicom_metadata s
+        WHERE s.study_instance_uid = ?{modality_clause}
         ORDER BY series_number ASC, series_time ASC, series_instance_uid ASC
         """,
         params
@@ -1801,7 +1789,7 @@ def upload_file():
             uploaded_path = os.path.join(temp_dir, file.filename)
             file.save(uploaded_path)
             
-            # Extract archive
+            # Extract archive into a temporary folder (cleaned up after processing)
             extract_dir = os.path.join(temp_dir, 'extracted')
             os.makedirs(extract_dir, exist_ok=True)
             
@@ -1837,13 +1825,8 @@ def upload_file():
                     db_path=db_path,
                     process_subdirs=True,
                     auto_workers=True,
+                    scan_root_label=f"zip:{Path(file.filename).name}",
                 )
-                
-                # Get summary from database - count new files added
-                conn = get_db_connection(db_path)
-                cursor = conn.execute("SELECT COUNT(*) FROM dicom_metadata")
-                total_files = cursor.fetchone()[0]
-                conn.close()
                 
                 return jsonify({
                     'success': True,
@@ -1857,7 +1840,7 @@ def upload_file():
                 }), 500
         
         finally:
-            # Clean up temporary directory
+            # Clean up temporary upload directory
             try:
                 shutil.rmtree(temp_dir)
             except Exception as e:
@@ -2061,7 +2044,6 @@ def dashboard():
 
         
         # Calculate statistics
-        import statistics
         
         # Helper function to safely convert to float or None
         def safe_float(value):
@@ -2701,12 +2683,10 @@ def format_private_timestamp(value_text: Optional[object]) -> Optional[str]:
                 return f"{base}.{parts[1][:1]}"
             return base
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?", text):
-            from datetime import datetime
             cleaned = text.replace("T", " ")
             fmt = "%Y-%m-%d %H:%M:%S.%f" if "." in cleaned else "%Y-%m-%d %H:%M:%S"
             return datetime.strptime(cleaned, fmt).strftime("%Y-%m-%d %H:%M:%S")
         if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}:\d{2}(\s*[AP]M)?", text):
-            from datetime import datetime
             for fmt in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S"):
                 try:
                     return datetime.strptime(text, fmt).strftime("%Y-%m-%d %H:%M:%S")
@@ -2794,7 +2774,6 @@ def parse_date_to_days(date_str):
     if not date_str or len(date_str) < 8:
         return None
     try:
-        from datetime import datetime
         year = int(date_str[:4])
         month = int(date_str[4:6])
         day = int(date_str[6:8])
@@ -2813,7 +2792,6 @@ def calculate_injection_delay(injection_date, injection_time, acquisition_date, 
         return None, None
 
     try:
-        from datetime import datetime
 
         inj_date_str = str(injection_date).strip()
         acq_date_str = str(acquisition_date).strip()
@@ -2857,7 +2835,6 @@ def calculate_patient_age(birth_date, study_date):
         return None
     
     try:
-        from datetime import datetime
         
         birth_str = str(birth_date).strip()
         study_str = str(study_date).strip()
@@ -2878,7 +2855,6 @@ def calculate_activity_at_scan(injected_activity, half_life_seconds, delay_minut
         return None
     
     try:
-        import math
         # Activity = A0 * e^(-lambda * t)
         # where lambda = ln(2) / half_life
         lambda_decay = math.log(2) / half_life_seconds

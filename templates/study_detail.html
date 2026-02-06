@@ -352,7 +352,7 @@
 <body>
     {% from "partials/top_bar/top_bar.html" import render_top_bar %}
     {% set lang_url_template = '/?db=' ~ db_name ~ '&lang=%s' %}
-    {% set databank_url_template = '/study/' ~ study_info.study_instance_uid ~ '?db=%s&lang=%s' %}
+    {% set databank_url_template = '/?db=%s&lang=%s' %}
     {% call render_top_bar('top-study-hamburger', 'top-study-menu', '&nbsp;', lang_url_template, databank_url_template, t, lang, db_name, databanks) %}
         <a href="/dashboard?db={{ db_name }}">{{ t.dashboard }}</a>
     {% endcall %}
@@ -483,6 +483,21 @@
                     <th>{{ t.accession_number }}</th>
                     <td class="info-value">{{ study_info.accession_number or 'N/A' }}</td>
                 </tr>
+                {% if study_info.study_absolute_paths %}
+                <tr>
+                    <th>{{ t.absolute_path or 'Absolute Path' }}</th>
+                    <td class="info-value">
+                        {% if study_info.study_absolute_path_labels %}
+                        {% for label in study_info.study_absolute_path_labels %}
+                        <div style="color: #7f8c8d; font-size: 12px;">{{ label }}</div>
+                        {% endfor %}
+                        {% endif %}
+                        {% for p in study_info.study_absolute_paths %}
+                        <div style="word-break: break-all;">{{ p }}</div>
+                        {% endfor %}
+                    </td>
+                </tr>
+                {% endif %}
                 <tr>
                     <th>{{ t.referring_physician }}</th>
                     <td class="info-value">{{ study_info.referring_physician_name or 'N/A' }}</td>
@@ -880,10 +895,17 @@
                                             <th>{{ t.series_uid }}</th>
                                             <td>{{ s.series_instance_uid }}</td>
                                         </tr>
+                                        {% if s.absolute_file_path %}
                                         <tr>
-                                            <th>{{ t.file_path }}</th>
-                                            <td>{{ s.file_path or 'N/A' }}</td>
+                                            <th>{{ t.absolute_file_path or 'Absolute File Path' }}</th>
+                                            <td>
+                                                {% if s.absolute_path_label %}
+                                                <div style="color: #7f8c8d; font-size: 12px;">{{ s.absolute_path_label }}</div>
+                                                {% endif %}
+                                                <div>{{ s.absolute_file_path }}</div>
+                                            </td>
                                         </tr>
+                                        {% endif %}
                                         {% if s.body_part_examined %}
                                         <tr>
                                             <th>{{ t.body_part }}</th>

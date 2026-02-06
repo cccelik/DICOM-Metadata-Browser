@@ -179,14 +179,60 @@ def prune_non_representative_series(conn: sqlite3.Connection) -> int:
             f"UPDATE dicom_metadata SET is_representative = 1 WHERE series_instance_uid IN ({placeholders})",
             chunk,
         )
-    conn.execute("""
-        DELETE FROM private_tag
-        WHERE series_instance_uid NOT IN (
-            SELECT series_instance_uid FROM dicom_metadata WHERE is_representative = 1
-        )
-    """)
-    cursor = conn.execute("DELETE FROM dicom_metadata WHERE is_representative = 0")
-    return cursor.rowcount
+    cursor = conn.execute("SELECT COUNT(*) FROM dicom_metadata WHERE is_representative = 0")
+    return cursor.fetchone()[0]
+
+
+def _bulk_insert_metadata(
+    conn: sqlite3.Connection,
+    metadata_entries: List[Tuple[Path, object]],
+    rel_base: Path,
+    scan_root: str,
+    batch_size: int = 500,
+    progress_total: Optional[int] = None,
+    vprint=None,
+) -> Tuple[int, int, int]:
+    from store_metadata import insert_metadata
+
+    processed = 0
+    skipped_duplicates = 0
+    skipped_invalid = 0
+    batch_metadata = []
+    batch_paths = []
+
+    def _flush() -> None:
+        nonlocal processed, skipped_duplicates, skipped_invalid
+        for meta_item, file_path_str in zip(batch_metadata, batch_paths):
+            inserted, reason = insert_metadata(
+                conn,
+                meta_item,
+                file_path_str,
+                scan_root=scan_root,
+                skip_existing=True,
+                commit=False,
+            )
+            if inserted:
+                processed += 1
+                if vprint and progress_total and processed % 10 == 0:
+                    vprint(f"   ✓ Processed {processed}/{progress_total} files...")
+            elif reason in ("series_exists", "already_exists"):
+                skipped_duplicates += 1
+            else:
+                skipped_invalid += 1
+        conn.commit()
+        batch_metadata.clear()
+        batch_paths.clear()
+
+    for file_path, meta in metadata_entries:
+        batch_metadata.append(meta)
+        batch_paths.append(str(file_path.relative_to(rel_base)))
+        if len(batch_metadata) >= batch_size:
+            _flush()
+
+    if batch_metadata:
+        _flush()
+
+    return processed, skipped_duplicates, skipped_invalid
 
 def process_single_scan(
     scan_dir: Path,
@@ -194,9 +240,11 @@ def process_single_scan(
     base_dir: Path,
     max_workers: Optional[int] = None,
     existing_paths: Optional[set] = None,
+    scan_root_label: Optional[str] = None,
 ) -> Tuple[int, int, int, List[str], Dict[str, float]]:
     """Process a single scan directory and store its metadata in the database."""
-    from store_metadata import insert_metadata, study_exists
+    from store_metadata import study_exists
+    scan_root = scan_root_label or str(base_dir.resolve())
     timings: Dict[str, float] = {}
     t0 = time.perf_counter()
 
@@ -231,65 +279,30 @@ def process_single_scan(
     timings["extract_metadata_s"] = time.perf_counter() - t_extract
     skipped_invalid = len(dcm_files) - len(metadata_entries)
 
-    processed = 0
-    skipped_duplicates = skipped_existing
     new_studies = set()
     seen_studies = set()
-
-    batch_metadata = []
-    batch_paths = []
-    batch_size = 500
-    t_insert = time.perf_counter()
-
-    for file_path, meta in metadata_entries:
+    for _, meta in metadata_entries:
         if meta.study_instance_uid and meta.study_instance_uid not in seen_studies:
             seen_studies.add(meta.study_instance_uid)
             if not study_exists(conn, meta.study_instance_uid):
                 new_studies.add(meta.study_instance_uid)
 
-        rel_path = str(file_path.relative_to(base_dir))
-        batch_metadata.append(meta)
-        batch_paths.append(rel_path)
-
-        if len(batch_metadata) >= batch_size:
-            for meta_item, file_path_str in zip(batch_metadata, batch_paths):
-                inserted, reason = insert_metadata(
-                    conn,
-                    meta_item,
-                    file_path_str,
-                    skip_existing=True,
-                    commit=False,
-                )
-                if inserted:
-                    processed += 1
-                elif reason in ("series_exists", "already_exists"):
-                    skipped_duplicates += 1
-                else:
-                    skipped_invalid += 1
-            conn.commit()
-            batch_metadata.clear()
-            batch_paths.clear()
-
-    if batch_metadata:
-        for meta_item, file_path_str in zip(batch_metadata, batch_paths):
-            inserted, reason = insert_metadata(
-                conn,
-                meta_item,
-                file_path_str,
-                skip_existing=True,
-                commit=False,
-            )
-            if inserted:
-                processed += 1
-            elif reason in ("series_exists", "already_exists"):
-                skipped_duplicates += 1
-            else:
-                skipped_invalid += 1
-        conn.commit()
-
+    t_insert = time.perf_counter()
+    processed, skipped_duplicates, skipped_invalid_insert = _bulk_insert_metadata(
+        conn,
+        metadata_entries,
+        base_dir,
+        scan_root,
+    )
     timings["insert_metadata_s"] = time.perf_counter() - t_insert
 
-    return processed, skipped_duplicates, skipped_invalid, list(new_studies), timings
+    return (
+        processed,
+        skipped_duplicates + skipped_existing,
+        skipped_invalid + skipped_invalid_insert,
+        list(new_studies),
+        timings,
+    )
 
 
 def process_directory(
@@ -301,6 +314,7 @@ def process_directory(
     verbose: bool = False,
     skip_existing_paths: bool = False,
     auto_workers: bool = True,
+    scan_root_label: Optional[str] = None,
 ):
     """Process all DICOM files in a directory, ZIP, or 7Z file and store metadata.
     
@@ -424,8 +438,8 @@ def process_directory(
                                 shutil.rmtree(temp_extract_dir)
                             except:
                                 pass
-                        _print_timing()
-                        return
+                            _print_timing()
+                            return
                         _vprint(f"   ✓ Extracted 7Z file (using system 7z)")
                 extract_timings["archive_extract_s"] = time.perf_counter() - t_archive
                 
@@ -496,6 +510,7 @@ def process_directory(
                     dicom_path,
                     max_workers=max_workers,
                     existing_paths=existing_paths,
+                    scan_root_label=scan_root_label,
                 )
                 if timing and scan_timings:
                     _vprint(f"      ⏱️ scan timings:")
@@ -537,6 +552,7 @@ def process_directory(
                     dicom_path,
                     max_workers=max_workers,
                     existing_paths=existing_paths,
+                    scan_root_label=scan_root_label,
                 )
                 if timing and scan_timings:
                     _vprint(f"      ⏱️ scan timings:")
@@ -587,6 +603,7 @@ def process_directory(
                 f for f in dicom_path.rglob("*.dcm")
                 if not f.name.startswith('._') and '__MACOSX' not in str(f)
             ]
+            scan_root = scan_root_label or str(dicom_path.resolve())
 
             if existing_paths:
                 filtered_files = []
@@ -616,55 +633,18 @@ def process_directory(
             )
             extract_timings["extract_metadata_s"] = time.perf_counter() - t_extract
             skipped_invalid = len(dcm_files) - len(metadata_entries)
-            processed = 0
-            skipped_duplicates = skipped_existing
-            from store_metadata import insert_metadata
             t_insert = time.perf_counter()
-            batch_metadata = []
-            batch_paths = []
-            batch_size = 500
-            for file_path, meta in metadata_entries:
-                batch_metadata.append(meta)
-                batch_paths.append(str(file_path.relative_to(dicom_path)))
-                if len(batch_metadata) >= batch_size:
-                    for meta_item, file_path_str in zip(batch_metadata, batch_paths):
-                        inserted, reason = insert_metadata(
-                            conn,
-                            meta_item,
-                            file_path_str,
-                            skip_existing=True,
-                            commit=False,
-                        )
-                        if inserted:
-                            processed += 1
-                            if processed % 10 == 0:
-                                _vprint(f"   ✓ Processed {processed}/{len(dcm_files)} files...")
-                        elif reason in ("series_exists", "already_exists"):
-                            skipped_duplicates += 1
-                        else:
-                            skipped_invalid += 1
-                    conn.commit()
-                    batch_metadata.clear()
-                    batch_paths.clear()
-            if batch_metadata:
-                for meta_item, file_path_str in zip(batch_metadata, batch_paths):
-                    inserted, reason = insert_metadata(
-                        conn,
-                        meta_item,
-                        file_path_str,
-                        skip_existing=True,
-                        commit=False,
-                    )
-                    if inserted:
-                        processed += 1
-                        if processed % 10 == 0:
-                            _vprint(f"   ✓ Processed {processed}/{len(dcm_files)} files...")
-                    elif reason in ("series_exists", "already_exists"):
-                        skipped_duplicates += 1
-                    else:
-                        skipped_invalid += 1
-                conn.commit()
+            processed, skipped_dup_insert, skipped_invalid_insert = _bulk_insert_metadata(
+                conn,
+                metadata_entries,
+                dicom_path,
+                scan_root,
+                progress_total=len(dcm_files),
+                vprint=_vprint,
+            )
             extract_timings["insert_metadata_s"] = time.perf_counter() - t_insert
+            skipped_duplicates = skipped_existing + skipped_dup_insert
+            skipped_invalid += skipped_invalid_insert
             
             if skipped_duplicates > 0:
                 _vprint(f"   ⚠️  Skipped {skipped_duplicates} duplicate files")
@@ -679,6 +659,7 @@ def process_directory(
             f for f in dicom_path.rglob("*.dcm")
             if not f.name.startswith('._') and '__MACOSX' not in str(f)
         ]
+        scan_root = scan_root_label or str(dicom_path.resolve())
 
         if existing_paths:
             filtered_files = []
@@ -714,55 +695,18 @@ def process_directory(
         )
         extract_timings["extract_metadata_s"] = time.perf_counter() - t_extract
         skipped_invalid = len(dcm_files) - len(metadata_entries)
-        processed = 0
-        skipped_duplicates = skipped_existing
-        from store_metadata import insert_metadata
         t_insert = time.perf_counter()
-        batch_metadata = []
-        batch_paths = []
-        batch_size = 500
-        for file_path, meta in metadata_entries:
-            batch_metadata.append(meta)
-            batch_paths.append(str(file_path.relative_to(dicom_path)))
-            if len(batch_metadata) >= batch_size:
-                for meta_item, file_path_str in zip(batch_metadata, batch_paths):
-                    inserted, reason = insert_metadata(
-                        conn,
-                        meta_item,
-                        file_path_str,
-                        skip_existing=True,
-                        commit=False,
-                    )
-                    if inserted:
-                        processed += 1
-                        if processed % 10 == 0:
-                            _vprint(f"   ✓ Processed {processed}/{len(dcm_files)} files...")
-                    elif reason in ("series_exists", "already_exists"):
-                        skipped_duplicates += 1
-                    else:
-                        skipped_invalid += 1
-                conn.commit()
-                batch_metadata.clear()
-                batch_paths.clear()
-        if batch_metadata:
-            for meta_item, file_path_str in zip(batch_metadata, batch_paths):
-                inserted, reason = insert_metadata(
-                    conn,
-                    meta_item,
-                    file_path_str,
-                    skip_existing=True,
-                    commit=False,
-                )
-                if inserted:
-                    processed += 1
-                    if processed % 10 == 0:
-                        _vprint(f"   ✓ Processed {processed}/{len(dcm_files)} files...")
-                elif reason in ("series_exists", "already_exists"):
-                    skipped_duplicates += 1
-                else:
-                    skipped_invalid += 1
-            conn.commit()
+        processed, skipped_dup_insert, skipped_invalid_insert = _bulk_insert_metadata(
+            conn,
+            metadata_entries,
+            dicom_path,
+            scan_root,
+            progress_total=len(dcm_files),
+            vprint=_vprint,
+        )
         extract_timings["insert_metadata_s"] = time.perf_counter() - t_insert
+        skipped_duplicates = skipped_existing + skipped_dup_insert
+        skipped_invalid += skipped_invalid_insert
         
         if skipped_duplicates > 0:
             _vprint(f"   ⚠️  Skipped {skipped_duplicates} duplicate files")
@@ -771,16 +715,13 @@ def process_directory(
         
         _vprint(f"   ✅ Added {processed} new files to database")
     
-    _vprint("\n   🧹 Pruning non-representative series...")
+    _vprint("\n   🧹 Marking representative series...")
     try:
         pruned = prune_non_representative_series(conn)
         conn.commit()
-        _vprint(f"   ✓ Removed {pruned} non-representative series")
-        _vprint("   🧹 Vacuuming database to reclaim space...")
-        conn.execute("VACUUM")
-        _vprint("   ✓ Vacuum complete")
+        _vprint(f"   ✓ Marked {pruned} non-representative series")
     except Exception as e:
-        _vprint(f"   ⚠ Warning: Could not prune non-representative series: {e}")
+        _vprint(f"   ⚠ Warning: Could not mark representative series: {e}")
 
     conn.close()
     _vprint(f"\n   💾 Database saved to: {db_path}")
