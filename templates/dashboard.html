@@ -345,7 +345,6 @@
     {% set databank_url_template = '/dashboard?db=%s&lang=%s' %}
     {% call render_top_bar('top-dashboard-hamburger', 'top-dashboard-menu', (t.dashboard_title or 'Analytics Dashboard'), lang_url_template, databank_url_template, t, lang, db_name, databanks) %}
         <a href="/?db={{ db_name }}&lang={{ lang }}">{{ t.back_to_studies or 'Back to Studies' }}</a>
-        <a href="/dashboard?db={{ db_name }}&lang={{ lang }}">{{ t.dashboard or 'Dashboard' }}</a>
     {% endcall %}
     <div class="container">
         <!-- Protocol Adherence Overview -->
