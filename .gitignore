@@ -4,6 +4,10 @@
 !process_dicom.py
 !store_metadata.py
 !webui.py
+!extract_one_per_series.py
+!dicom_discovery.py
+!pyproject.toml
+!.flake8
 !requirements.txt
 !README.md
 !TUMLogo.svg

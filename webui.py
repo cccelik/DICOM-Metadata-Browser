@@ -3,22 +3,24 @@
 Clean Web UI for DICOM Metadata Browser
 """
 
-from flask import Flask, render_template, request, jsonify, session, send_from_directory, Response
-import sqlite3
-import math
-import statistics
-from datetime import datetime
-from pathlib import Path
-import os
-import tempfile
-import zipfile
-import shutil
 import csv
 import io
+import math
+import os
 import re
+import shutil
+import sqlite3
+import statistics
+import tempfile
 import xml.etree.ElementTree as ET
+import zipfile
+from datetime import datetime
 from difflib import SequenceMatcher
-from typing import Optional, List, Tuple, Dict
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory, session
+
 from process_dicom import process_directory
 from store_metadata import init_database
 from translations import get_translation
@@ -733,15 +735,15 @@ def fuzzy_match(text1, text2, threshold=0.6):
         return 0.0
     text1 = str(text1).lower().strip()
     text2 = str(text2).lower().strip()
-    
+
     # Exact match
     if text1 == text2:
         return 1.0
-    
+
     # Contains match
     if text1 in text2 or text2 in text1:
         return 0.9
-    
+
     # Sequence similarity
     return SequenceMatcher(None, text1, text2).ratio()
 
@@ -749,14 +751,14 @@ def fuzzy_match(text1, text2, threshold=0.6):
 def build_search_query(search_term):
     """Build SQL query with case-insensitive fuzzy search"""
     search_term = search_term.strip()
-    
+
     # Convert search term to lowercase for consistent case-insensitive matching
     search_term_lower = search_term.lower()
-    
+
     # Escape special characters for LIKE queries (%, _) - use double backslash for SQL escape
     escaped_term = search_term_lower.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
     search_like = f"%{escaped_term}%"
-    
+
     # Build WHERE clause with OR conditions across multiple fields
     # Case-insensitive search using LOWER() on both field and pattern
     # SQLite LIKE is case-insensitive by default, but LOWER() ensures it for all databases
@@ -772,7 +774,7 @@ def build_search_query(search_term):
             LOWER(f.accession_number) LIKE ? ESCAPE '\\'
         )
     """
-    
+
     query = f"""
         WITH ranked AS (
             SELECT
@@ -790,8 +792,15 @@ def build_search_query(search_term):
         ),
         filtered AS (
             SELECT * FROM ranked WHERE rn = 1
+        ),
+        series_counts AS (
+            SELECT
+                study_instance_uid,
+                COUNT(DISTINCT COALESCE(series_instance_uid, sop_instance_uid, file_path)) AS series_count
+            FROM dicom_metadata
+            GROUP BY study_instance_uid
         )
-        SELECT 
+        SELECT
             f.study_instance_uid,
             MAX(f.patient_id) as patient_id,
             MAX(f.patient_name) as patient_name,
@@ -801,783 +810,864 @@ def build_search_query(search_term):
             GROUP_CONCAT(DISTINCT f.modality) as modality,
             GROUP_CONCAT(DISTINCT f.manufacturer) as manufacturer,
             GROUP_CONCAT(DISTINCT f.radiopharmaceutical) as radiopharmaceutical,
-            COUNT(*) as series_count
+            COALESCE(MAX(sc.series_count), 0) as series_count
         FROM filtered f
+        LEFT JOIN series_counts sc ON sc.study_instance_uid = f.study_instance_uid
         {where_clause}
         GROUP BY f.study_instance_uid
         ORDER BY study_date DESC, study_time DESC
     """
-    
+
     return query, [search_like] * 8
 
+
+def _index_template_context(
+    *,
+    db_name: str,
+    databanks: List[str],
+    search_term: str,
+    deleted: str,
+    deleted_count: str,
+    uptake_min: Optional[float],
+    uptake_max: Optional[float],
+    dose_min: Optional[float],
+    dose_max: Optional[float],
+    has_filters: bool,
+    modality_filters: List[str],
+    manufacturer_filters: List[str],
+    radiopharmaceutical_filters: List[str],
+    translations: dict,
+    studies: Optional[List[dict]] = None,
+    available_modalities: Optional[List[str]] = None,
+    available_manufacturers: Optional[List[str]] = None,
+    available_radiopharmaceuticals: Optional[List[str]] = None,
+    error: Optional[str] = None,
+) -> dict:
+    return {
+        "studies": studies or [],
+        "db_name": db_name,
+        "databanks": databanks,
+        "error": error,
+        "search_term": search_term,
+        "deleted": deleted,
+        "deleted_count": deleted_count,
+        "uptake_min": uptake_min,
+        "uptake_max": uptake_max,
+        "dose_min": dose_min,
+        "dose_max": dose_max,
+        "has_filters": has_filters,
+        "modality_filters": modality_filters,
+        "available_modalities": available_modalities or [],
+        "manufacturer_filters": manufacturer_filters,
+        "available_manufacturers": available_manufacturers or [],
+        "radiopharmaceutical_filters": radiopharmaceutical_filters,
+        "available_radiopharmaceuticals": available_radiopharmaceuticals or [],
+        "t": translations,
+        "lang": get_language(),
+    }
+
+
+def _load_filter_options(conn: sqlite3.Connection) -> Tuple[List[str], List[str], List[str]]:
+    cursor = conn.execute("""
+        SELECT DISTINCT modality
+        FROM dicom_metadata
+        WHERE modality IS NOT NULL AND modality != ''
+        ORDER BY modality
+    """)
+    available_modalities = [row[0] for row in cursor.fetchall()]
+
+    cursor = conn.execute("""
+        SELECT DISTINCT manufacturer
+        FROM dicom_metadata
+        WHERE manufacturer IS NOT NULL AND manufacturer != ''
+        ORDER BY manufacturer
+    """)
+    available_manufacturers = [row[0] for row in cursor.fetchall()]
+
+    cursor = conn.execute("""
+        SELECT DISTINCT radiopharmaceutical
+        FROM dicom_metadata
+        WHERE radiopharmaceutical IS NOT NULL AND radiopharmaceutical != ''
+        ORDER BY radiopharmaceutical
+    """)
+    available_radiopharmaceuticals = [row[0] for row in cursor.fetchall()]
+    return available_modalities, available_manufacturers, available_radiopharmaceuticals
+
+
+def _matches_range_filters(
+    delay_minutes: Optional[float],
+    dose_per_kg: Optional[float],
+    uptake_min: Optional[float],
+    uptake_max: Optional[float],
+    dose_min: Optional[float],
+    dose_max: Optional[float],
+    uptake_max_precision: int,
+    dose_max_precision: int,
+) -> bool:
+    if uptake_min is not None or uptake_max is not None:
+        if delay_minutes is None:
+            return False
+        if uptake_min is not None and delay_minutes < uptake_min:
+            return False
+        if uptake_max is not None:
+            compare_delay = round(delay_minutes, uptake_max_precision) if uptake_max_precision else delay_minutes
+            if compare_delay > uptake_max:
+                return False
+
+    if dose_min is not None or dose_max is not None:
+        if dose_per_kg is None:
+            return False
+        if dose_min is not None and dose_per_kg < dose_min:
+            return False
+        if dose_max is not None:
+            compare_dose = round(dose_per_kg, dose_max_precision) if dose_max_precision else dose_per_kg
+            if compare_dose > dose_max:
+                return False
+
+    return True
+
+
+def _compute_filtered_study_uids(
+    conn: sqlite3.Connection,
+    *,
+    has_filters: bool,
+    qa_filters: bool,
+    uptake_min: Optional[float],
+    uptake_max: Optional[float],
+    dose_min: Optional[float],
+    dose_max: Optional[float],
+    uptake_max_precision: int,
+    dose_max_precision: int,
+    missing: Optional[str],
+    timing_issue: Optional[str],
+    dose_issue: Optional[str],
+    composition: Optional[str],
+    qa_score: Optional[int],
+) -> Optional[set]:
+    if not has_filters:
+        return None
+
+    representative_map, representative_series_rows = load_representative_series(conn)
+    filtered_study_uids = {
+        entry["row"]["study_instance_uid"]
+        for entry in representative_map.values()
+        if _matches_range_filters(
+            entry["delay_minutes"],
+            entry["dose_per_kg"],
+            uptake_min,
+            uptake_max,
+            dose_min,
+            dose_max,
+            uptake_max_precision,
+            dose_max_precision,
+        )
+    }
+
+    if not qa_filters:
+        return filtered_study_uids
+
+    representative_series_rows = [entry["row"] for entry in representative_map.values()]
+    study_flags: Dict[str, dict] = {}
+    study_modalities: Dict[str, set] = {}
+
+    cursor = conn.execute("""
+        SELECT
+            study_instance_uid,
+            GROUP_CONCAT(DISTINCT modality) as modalities
+        FROM dicom_metadata
+        GROUP BY study_instance_uid
+    """)
+    for row in cursor.fetchall():
+        study_uid = row["study_instance_uid"]
+        if not study_uid:
+            continue
+        study_modalities[study_uid] = set((row["modalities"] or "").split(","))
+
+    for row in representative_series_rows:
+        study_uid = row.get("study_instance_uid")
+        if not study_uid:
+            continue
+        flags = study_flags.setdefault(study_uid, {
+            "weight": False,
+            "dose": False,
+            "injection_time": False,
+            "acquisition_time": False,
+            "radiopharmaceutical": False,
+            "patient_sex": False,
+            "patient_age": False,
+        })
+        modality = row.get("modality") or ""
+        study_modalities.setdefault(study_uid, set()).add(modality)
+        if parse_db_float(row.get("patient_weight")) is not None:
+            flags["weight"] = True
+        if parse_db_float(row.get("injected_activity")) is not None:
+            flags["dose"] = True
+        if row.get("injection_time"):
+            flags["injection_time"] = True
+        if row.get("acquisition_time"):
+            flags["acquisition_time"] = True
+        if row.get("patient_sex"):
+            flags["patient_sex"] = True
+        if row.get("patient_age") or row.get("patient_birth_date"):
+            flags["patient_age"] = True
+        if is_radiopharm_modality(modality) and has_radiopharm(row):
+            flags["radiopharmaceutical"] = True
+
+    missing_study_uids = set()
+    if missing:
+        for study_uid, flags in study_flags.items():
+            if missing in ("radiopharmaceutical", "dose", "injection_time"):
+                modalities = study_modalities.get(study_uid, set())
+                if not any(is_radiopharm_modality(m or "") for m in modalities):
+                    continue
+            if not flags.get(missing, False):
+                missing_study_uids.add(study_uid)
+
+    dose_values = []
+    for row in representative_series_rows:
+        modality = row.get("modality") or ""
+        if not is_radiopharm_modality(modality):
+            continue
+        dose_per_kg, _ = compute_dose_from_row(row)
+        if dose_per_kg is not None:
+            dose_values.append(dose_per_kg)
+    dose_mean = statistics.mean(dose_values) if dose_values else None
+    dose_std = statistics.stdev(dose_values) if len(dose_values) > 1 else None
+
+    csa_counts: Dict[str, int] = {}
+    for row in representative_series_rows:
+        fp = row.get("csa_series_header_hash")
+        if fp:
+            csa_counts[fp] = csa_counts.get(fp, 0) + 1
+    majority_csa = max(csa_counts, key=csa_counts.get) if csa_counts else None
+
+    qa_filtered_uids = set()
+    for row in representative_series_rows:
+        matches = True
+
+        if missing and row.get("study_instance_uid") not in missing_study_uids:
+            matches = False
+
+        if timing_issue:
+            _, status = compute_delay_status(row)
+            if timing_issue == "study_time_conflict":
+                if not has_time_conflict(row):
+                    matches = False
+            elif status != timing_issue:
+                matches = False
+
+        if dose_issue:
+            modality = row.get("modality") or ""
+            if not is_radiopharm_modality(modality):
+                matches = False
+            if not matches:
+                continue
+            dose_per_kg, _ = compute_dose_from_row(row)
+            injected_activity = parse_db_float(row.get("injected_activity"))
+            patient_weight = get_patient_weight(row)
+            if dose_issue == "missing_activity" and not (patient_weight and injected_activity is None):
+                matches = False
+            elif dose_issue == "missing_weight" and not (injected_activity is not None and not patient_weight):
+                matches = False
+            elif dose_issue == "unit_mismatch":
+                if dose_per_kg is None or (0.1 <= dose_per_kg <= 50):
+                    matches = False
+            elif dose_issue == "outlier":
+                if dose_per_kg is None or dose_mean is None or not dose_std:
+                    matches = False
+                elif abs(dose_per_kg - dose_mean) <= 3 * dose_std:
+                    matches = False
+
+        if qa_score is not None:
+            score = 0
+            if parse_db_float(row.get("patient_weight")) is not None:
+                score += 1
+            if parse_db_float(row.get("injected_activity")) is not None:
+                score += 1
+            _, status = compute_delay_status(row)
+            if status in ("ok", "too_long"):
+                score += 1
+            if status == "ok" and not has_time_conflict(row):
+                score += 1
+            if majority_csa and row.get("csa_series_header_hash") == majority_csa:
+                score += 1
+            if score != qa_score:
+                matches = False
+
+        if matches and row.get("study_instance_uid"):
+            qa_filtered_uids.add(row["study_instance_uid"])
+
+    if missing:
+        qa_filtered_uids = missing_study_uids
+
+    if composition:
+        composition_uids = set()
+        for study_uid, mods in study_modalities.items():
+            series_count = 1
+            if composition == "missing_ct" and "PT" in mods and "CT" not in mods:
+                composition_uids.add(study_uid)
+            elif composition == "missing_pt" and "CT" in mods and "PT" not in mods:
+                composition_uids.add(study_uid)
+            elif composition == "high_series" and series_count > 20:
+                composition_uids.add(study_uid)
+        qa_filtered_uids = qa_filtered_uids.intersection(composition_uids) if qa_filtered_uids else composition_uids
+
+    if filtered_study_uids:
+        return filtered_study_uids.intersection(qa_filtered_uids)
+    return qa_filtered_uids
+
+
+def _rank_search_results(studies: List[dict], search_term: str) -> List[dict]:
+    search_lower = search_term.lower().strip()
+    for study in studies:
+        score = 0.0
+        best_match_field = None
+        fields_to_check = [
+            ("patient_name", study.get("patient_name", "")),
+            ("patient_id", study.get("patient_id", "")),
+            ("modality", study.get("modality", "")),
+            ("study_description", study.get("study_description", "")),
+            ("manufacturer", study.get("manufacturer", "")),
+            ("radiopharmaceutical", study.get("radiopharmaceutical", "")),
+        ]
+
+        for field_name, field_value in fields_to_check:
+            if not field_value:
+                continue
+            field_lower = str(field_value).lower()
+            if search_lower == field_lower:
+                score = max(score, 1.0)
+                best_match_field = field_name
+            elif search_lower in field_lower:
+                score = max(score, 0.95)
+                if not best_match_field:
+                    best_match_field = field_name
+            elif field_lower in search_lower:
+                score = max(score, 0.9)
+                if not best_match_field:
+                    best_match_field = field_name
+            else:
+                sim = fuzzy_match(search_lower, field_lower)
+                if sim > score:
+                    score = max(score, sim)
+                    if sim >= 0.7:
+                        best_match_field = field_name
+
+        if score == 0.0:
+            score = 0.5
+
+        study["match_score"] = score
+        study["match_field"] = best_match_field
+
+    studies.sort(key=lambda x: x.get("match_score", 0), reverse=True)
+    return studies
+
+
+def _load_index_studies(conn: sqlite3.Connection, search_term: str) -> List[dict]:
+    if search_term:
+        query, params = build_search_query(search_term)
+        cursor = conn.execute(query, params)
+        studies = [dict(row) for row in cursor.fetchall()]
+        return _rank_search_results(studies, search_term)
+
+    cursor = conn.execute("""
+        WITH ranked AS (
+            SELECT
+                s.*,
+                ROW_NUMBER() OVER (
+                    PARTITION BY s.study_instance_uid, s.modality
+                    ORDER BY
+                        COALESCE(s.number_of_slices, 0) DESC,
+                        s.series_time IS NULL,
+                        s.series_time ASC,
+                        s.series_number IS NULL,
+                        s.series_number ASC
+                ) AS rn
+            FROM dicom_metadata s
+        ),
+        series_counts AS (
+            SELECT
+                study_instance_uid,
+                COUNT(DISTINCT COALESCE(series_instance_uid, sop_instance_uid, file_path)) AS series_count
+            FROM dicom_metadata
+            GROUP BY study_instance_uid
+        )
+        SELECT
+            r.study_instance_uid,
+            MAX(r.patient_id) as patient_id,
+            MAX(r.patient_name) as patient_name,
+            MAX(r.study_date) as study_date,
+            MAX(r.study_time) as study_time,
+            MAX(r.study_description) as study_description,
+            GROUP_CONCAT(DISTINCT r.modality) as modality,
+            GROUP_CONCAT(DISTINCT r.manufacturer) as manufacturer,
+            GROUP_CONCAT(DISTINCT r.radiopharmaceutical) as radiopharmaceutical,
+            COALESCE(MAX(sc.series_count), 0) as series_count
+        FROM ranked r
+        LEFT JOIN series_counts sc ON sc.study_instance_uid = r.study_instance_uid
+        WHERE r.rn = 1
+        GROUP BY r.study_instance_uid
+        ORDER BY study_date DESC, study_time DESC
+    """)
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def _split_csv(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
+def _apply_category_filters(
+    studies: List[dict],
+    modality_filters: List[str],
+    manufacturer_filters: List[str],
+    radiopharmaceutical_filters: List[str],
+) -> List[dict]:
+    if modality_filters:
+        studies = [
+            study for study in studies
+            if set(_split_csv(study.get("modality"))).intersection(modality_filters)
+        ]
+    if manufacturer_filters:
+        studies = [
+            study for study in studies
+            if set(_split_csv(study.get("manufacturer"))).intersection(manufacturer_filters)
+        ]
+    if radiopharmaceutical_filters:
+        studies = [
+            study for study in studies
+            if set(_split_csv(study.get("radiopharmaceutical"))).intersection(radiopharmaceutical_filters)
+        ]
+    return studies
+
+
+def _format_index_studies(studies: List[dict]) -> List[dict]:
+    for study in studies:
+        if study.get("study_date"):
+            study["study_date_formatted"] = format_date(study["study_date"])
+        if study.get("study_time"):
+            study["study_time_formatted"] = format_time(study["study_time"])
+        study["patient_name_display"] = format_patient_name(study.get("patient_name")) or None
+    return studies
 
 
 @app.route('/')
 def index():
     """Main page - list all studies with optional search"""
-    # Handle language setting
-    lang = request.args.get('lang')
-    if lang and lang in ['en', 'de']:
-        session['language'] = lang
-    
-    db_name = normalize_db_name(request.args.get('db'))
+    lang = request.args.get("lang")
+    if lang and lang in ["en", "de"]:
+        session["language"] = lang
+
+    db_name = normalize_db_name(request.args.get("db"))
     db_path = resolve_db_path(db_name)
-    search_term = request.args.get('search', '').strip()
-    deleted = request.args.get('deleted', '0')
-    deleted_count = request.args.get('count', '0')
-    uptake_min = parse_float_arg(request.args.get('uptake_min'))
-    uptake_max_raw = request.args.get('uptake_max')
+    search_term = request.args.get("search", "").strip()
+    deleted = request.args.get("deleted", "0")
+    deleted_count = request.args.get("count", "0")
+    uptake_min = parse_float_arg(request.args.get("uptake_min"))
+    uptake_max_raw = request.args.get("uptake_max")
     uptake_max = parse_float_arg(uptake_max_raw)
-    dose_min = parse_float_arg(request.args.get('dose_min'))
-    dose_max_raw = request.args.get('dose_max')
+    dose_min = parse_float_arg(request.args.get("dose_min"))
+    dose_max_raw = request.args.get("dose_max")
     dose_max = parse_float_arg(dose_max_raw)
     uptake_max_precision = count_decimal_places(uptake_max_raw)
     dose_max_precision = count_decimal_places(dose_max_raw)
-    missing = request.args.get('missing')
-    timing_issue = request.args.get('timing_issue')
-    dose_issue = request.args.get('dose_issue')
-    composition = request.args.get('composition')
-    qa_score_raw = request.args.get('qa_score')
+    missing = request.args.get("missing")
+    timing_issue = request.args.get("timing_issue")
+    dose_issue = request.args.get("dose_issue")
+    composition = request.args.get("composition")
+    qa_score_raw = request.args.get("qa_score")
     qa_score = int(qa_score_raw) if qa_score_raw and qa_score_raw.isdigit() else None
-    modality_filters = [m.strip() for m in request.args.getlist('modality') if m.strip()]
-    manufacturer_filters = [m.strip() for m in request.args.getlist('manufacturer') if m.strip()]
-    radiopharmaceutical_filters = [r.strip() for r in request.args.getlist('radiopharmaceutical') if r.strip()]
+    modality_filters = [m.strip() for m in request.args.getlist("modality") if m.strip()]
+    manufacturer_filters = [m.strip() for m in request.args.getlist("manufacturer") if m.strip()]
+    radiopharmaceutical_filters = [r.strip() for r in request.args.getlist("radiopharmaceutical") if r.strip()]
     qa_filters = any([missing, timing_issue, dose_issue, composition, qa_score is not None])
-    has_filters = any(v is not None for v in (uptake_min, uptake_max, dose_min, dose_max)) or \
-        bool(modality_filters or manufacturer_filters or radiopharmaceutical_filters) or \
-        qa_filters
-    
+    has_filters = (
+        any(v is not None for v in (uptake_min, uptake_max, dose_min, dose_max))
+        or bool(modality_filters or manufacturer_filters or radiopharmaceutical_filters)
+        or qa_filters
+    )
+
     translations = get_translations()
     databanks = list_databanks()
-    
+    context = _index_template_context(
+        db_name=db_name,
+        databanks=databanks,
+        search_term=search_term,
+        deleted=deleted,
+        deleted_count=deleted_count,
+        uptake_min=uptake_min,
+        uptake_max=uptake_max,
+        dose_min=dose_min,
+        dose_max=dose_max,
+        has_filters=has_filters,
+        modality_filters=modality_filters,
+        manufacturer_filters=manufacturer_filters,
+        radiopharmaceutical_filters=radiopharmaceutical_filters,
+        translations=translations,
+    )
+
     if not os.path.exists(db_path):
-        return render_template(
-            'index.html',
-            studies=[],
-            db_name=db_name,
-            databanks=databanks,
-            error="Database not found",
-            search_term=search_term,
-            deleted=deleted,
-            deleted_count=deleted_count,
-            uptake_min=uptake_min,
-            uptake_max=uptake_max,
-            dose_min=dose_min,
-            dose_max=dose_max,
-            has_filters=has_filters,
-            modality_filters=modality_filters,
-            available_modalities=[],
-            manufacturer_filters=manufacturer_filters,
-            available_manufacturers=[],
-            radiopharmaceutical_filters=radiopharmaceutical_filters,
-            available_radiopharmaceuticals=[],
-            t=translations,
-            lang=get_language(),
-        )
-    
+        context["error"] = "Database not found"
+        return render_template("index.html", **context)
+
     try:
         conn = get_db_connection(db_path)
-        filtered_study_uids = None
-        cursor = conn.execute("""
-            SELECT DISTINCT modality
-            FROM dicom_metadata
-            WHERE modality IS NOT NULL AND modality != ''
-            ORDER BY modality
-        """)
-        available_modalities = [row[0] for row in cursor.fetchall()]
-        cursor = conn.execute("""
-            SELECT DISTINCT manufacturer
-            FROM dicom_metadata
-            WHERE manufacturer IS NOT NULL AND manufacturer != ''
-            ORDER BY manufacturer
-        """)
-        available_manufacturers = [row[0] for row in cursor.fetchall()]
-        cursor = conn.execute("""
-            SELECT DISTINCT radiopharmaceutical
-            FROM dicom_metadata
-            WHERE radiopharmaceutical IS NOT NULL AND radiopharmaceutical != ''
-            ORDER BY radiopharmaceutical
-        """)
-        available_radiopharmaceuticals = [row[0] for row in cursor.fetchall()]
-
-        if has_filters:
-            representative_map, representative_series_rows = load_representative_series(conn)
-
-            def matches_filters(delay_minutes: Optional[float], dose_per_kg: Optional[float]) -> bool:
-                if uptake_min is not None or uptake_max is not None:
-                    if delay_minutes is None:
-                        return False
-                    if uptake_min is not None and delay_minutes < uptake_min:
-                        return False
-                    if uptake_max is not None:
-                        compare_delay = round(delay_minutes, uptake_max_precision) if uptake_max_precision else delay_minutes
-                        if compare_delay > uptake_max:
-                            return False
-                if dose_min is not None or dose_max is not None:
-                    if dose_per_kg is None:
-                        return False
-                    if dose_min is not None and dose_per_kg < dose_min:
-                        return False
-                    if dose_max is not None:
-                        compare_dose = round(dose_per_kg, dose_max_precision) if dose_max_precision else dose_per_kg
-                        if compare_dose > dose_max:
-                            return False
-                return True
-
-            filtered_study_uids = set()
-            for entry in representative_map.values():
-                if matches_filters(entry["delay_minutes"], entry["dose_per_kg"]):
-                    filtered_study_uids.add(entry["row"]["study_instance_uid"])
-
-            if qa_filters:
-                representative_series_rows = [entry["row"] for entry in representative_map.values()]
-
-                study_flags = {}
-                study_modalities = {}
-                cursor = conn.execute("""
-                    SELECT
-                        study_instance_uid,
-                        GROUP_CONCAT(DISTINCT modality) as modalities
-                    FROM dicom_metadata
-                    GROUP BY study_instance_uid
-                """)
-                for row in cursor.fetchall():
-                    study_uid = row["study_instance_uid"]
-                    if not study_uid:
-                        continue
-                    study_modalities[study_uid] = set((row["modalities"] or "").split(","))
-
-                for row in representative_series_rows:
-                    study_uid = row.get("study_instance_uid")
-                    if not study_uid:
-                        continue
-                    flags = study_flags.setdefault(study_uid, {
-                        "weight": False,
-                        "dose": False,
-                        "injection_time": False,
-                        "acquisition_time": False,
-                        "radiopharmaceutical": False,
-                        "patient_sex": False,
-                        "patient_age": False
-                    })
-                    modality = row.get("modality") or ""
-                    study_modalities.setdefault(study_uid, set()).add(modality)
-                    if parse_db_float(row.get("patient_weight")) is not None:
-                        flags["weight"] = True
-                    if parse_db_float(row.get("injected_activity")) is not None:
-                        flags["dose"] = True
-                    if row.get("injection_time"):
-                        flags["injection_time"] = True
-                    if row.get("acquisition_time"):
-                        flags["acquisition_time"] = True
-                    if row.get("patient_sex"):
-                        flags["patient_sex"] = True
-                    if row.get("patient_age") or row.get("patient_birth_date"):
-                        flags["patient_age"] = True
-                    if is_radiopharm_modality(modality) and has_radiopharm(row):
-                        flags["radiopharmaceutical"] = True
-
-                missing_study_uids = set()
-                if missing:
-                    for study_uid, flags in study_flags.items():
-                        if missing in ("radiopharmaceutical", "dose", "injection_time"):
-                            modalities = study_modalities.get(study_uid, set())
-                            if not any(is_radiopharm_modality(m or "") for m in modalities):
-                                continue
-                        if not flags.get(missing, False):
-                            missing_study_uids.add(study_uid)
-
-                dose_values = []
-                for row in representative_series_rows:
-                    modality = row.get("modality") or ""
-                    if not is_radiopharm_modality(modality):
-                        continue
-                    dose_per_kg, _ = compute_dose_from_row(row)
-                    if dose_per_kg is not None:
-                        dose_values.append(dose_per_kg)
-                dose_mean = statistics.mean(dose_values) if dose_values else None
-                dose_std = statistics.stdev(dose_values) if len(dose_values) > 1 else None
-
-                csa_counts = {}
-                for row in representative_series_rows:
-                    fp = row.get("csa_series_header_hash")
-                    if fp:
-                        csa_counts[fp] = csa_counts.get(fp, 0) + 1
-                majority_csa = max(csa_counts, key=csa_counts.get) if csa_counts else None
-
-                qa_filtered_uids = set()
-                for row in representative_series_rows:
-                    matches = True
-                    if missing:
-                        if row.get("study_instance_uid") not in missing_study_uids:
-                            matches = False
-                    if timing_issue:
-                        _, status = compute_delay_status(row)
-                        if timing_issue == "study_time_conflict":
-                            if not has_time_conflict(row):
-                                matches = False
-                        elif status != timing_issue:
-                            matches = False
-                    if dose_issue:
-                        modality = row.get("modality") or ""
-                        if not is_radiopharm_modality(modality):
-                            matches = False
-                        if not matches:
-                            continue
-                        dose_per_kg, _ = compute_dose_from_row(row)
-                        injected_activity = parse_db_float(row.get("injected_activity"))
-                        patient_weight = get_patient_weight(row)
-                        if dose_issue == "missing_activity" and not (patient_weight and injected_activity is None):
-                            matches = False
-                        elif dose_issue == "missing_weight" and not (injected_activity is not None and not patient_weight):
-                            matches = False
-                        elif dose_issue == "unit_mismatch":
-                            if dose_per_kg is None or (0.1 <= dose_per_kg <= 50):
-                                matches = False
-                        elif dose_issue == "outlier":
-                            if dose_per_kg is None or dose_mean is None or not dose_std:
-                                matches = False
-                            elif abs(dose_per_kg - dose_mean) <= 3 * dose_std:
-                                matches = False
-                    if qa_score is not None:
-                        score = 0
-                        if parse_db_float(row.get("patient_weight")) is not None:
-                            score += 1
-                        if parse_db_float(row.get("injected_activity")) is not None:
-                            score += 1
-                        _, status = compute_delay_status(row)
-                        if status in ("ok", "too_long"):
-                            score += 1
-                        if status == "ok" and not has_time_conflict(row):
-                            score += 1
-                        if majority_csa and row.get("csa_series_header_hash") == majority_csa:
-                            score += 1
-                        if score != qa_score:
-                            matches = False
-                    if matches and row.get("study_instance_uid"):
-                        qa_filtered_uids.add(row["study_instance_uid"])
-
-                if missing:
-                    qa_filtered_uids = missing_study_uids
-
-                if composition:
-                    composition_uids = set()
-                    for study_uid, mods in study_modalities.items():
-                        series_count = 1
-                        if composition == "missing_ct" and "PT" in mods and "CT" not in mods:
-                            composition_uids.add(study_uid)
-                        elif composition == "missing_pt" and "CT" in mods and "PT" not in mods:
-                            composition_uids.add(study_uid)
-                        elif composition == "high_series" and series_count > 20:
-                            composition_uids.add(study_uid)
-                    qa_filtered_uids = qa_filtered_uids.intersection(composition_uids) if qa_filtered_uids else composition_uids
-
-                if filtered_study_uids:
-                    filtered_study_uids = filtered_study_uids.intersection(qa_filtered_uids)
-                else:
-                    filtered_study_uids = qa_filtered_uids
-        
-        if search_term:
-            query, params = build_search_query(search_term)
-            cursor = conn.execute(query, params)
-            all_studies = [dict(row) for row in cursor.fetchall()]
-            
-            # Calculate match scores for ranking (but don't filter - SQL already found matches)
-            search_lower = search_term.lower().strip()
-            for study in all_studies:
-                score = 0.0
-                best_match_field = None
-                
-                fields_to_check = [
-                    ('patient_name', study.get('patient_name', '')),
-                    ('patient_id', study.get('patient_id', '')),
-                    ('modality', study.get('modality', '')),
-                    ('study_description', study.get('study_description', '')),
-                    ('manufacturer', study.get('manufacturer', '')),
-                    ('radiopharmaceutical', study.get('radiopharmaceutical', '')),
-                ]
-                
-                for field_name, field_value in fields_to_check:
-                    if field_value:
-                        field_lower = str(field_value).lower()
-                        # Exact match
-                        if search_lower == field_lower:
-                            score = max(score, 1.0)
-                            best_match_field = field_name
-                        # Contains match (SQL LIKE already found this, so this is likely)
-                        elif search_lower in field_lower:
-                            score = max(score, 0.95)
-                            if not best_match_field:
-                                best_match_field = field_name
-                        elif field_lower in search_lower:
-                            score = max(score, 0.9)
-                            if not best_match_field:
-                                best_match_field = field_name
-                        # Fuzzy match for typo tolerance
-                        else:
-                            sim = fuzzy_match(search_lower, field_lower)
-                            if sim > score:
-                                score = max(score, sim)
-                                if sim >= 0.7:  # Good fuzzy match
-                                    best_match_field = field_name
-                
-                # If SQL found it but no good match, give it a baseline score
-                if score == 0.0:
-                    score = 0.5  # SQL found it, so it's a match, just not a great one
-                
-                study['match_score'] = score
-                study['match_field'] = best_match_field
-            
-            # Sort by match score (best matches first)
-            all_studies.sort(key=lambda x: x.get('match_score', 0), reverse=True)
-            studies = all_studies
-        else:
-            cursor = conn.execute("""
-                WITH ranked AS (
-                    SELECT
-                        s.*,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY s.study_instance_uid, s.modality
-                            ORDER BY
-                                COALESCE(s.number_of_slices, 0) DESC,
-                                s.series_time IS NULL,
-                                s.series_time ASC,
-                                s.series_number IS NULL,
-                                s.series_number ASC
-                        ) AS rn
-                    FROM dicom_metadata s
-                )
-                SELECT 
-                    r.study_instance_uid,
-                    MAX(r.patient_id) as patient_id,
-                    MAX(r.patient_name) as patient_name,
-                    MAX(r.study_date) as study_date,
-                    MAX(r.study_time) as study_time,
-                    MAX(r.study_description) as study_description,
-                    GROUP_CONCAT(DISTINCT r.modality) as modality,
-                    GROUP_CONCAT(DISTINCT r.manufacturer) as manufacturer,
-                    GROUP_CONCAT(DISTINCT r.radiopharmaceutical) as radiopharmaceutical,
-                    COUNT(*) as series_count
-                FROM ranked r
-                WHERE r.rn = 1
-                GROUP BY r.study_instance_uid
-                ORDER BY study_date DESC, study_time DESC
-        """)
-            studies = [dict(row) for row in cursor.fetchall()]
-        
+        available_modalities, available_manufacturers, available_radiopharmaceuticals = _load_filter_options(conn)
+        filtered_study_uids = _compute_filtered_study_uids(
+            conn,
+            has_filters=has_filters,
+            qa_filters=qa_filters,
+            uptake_min=uptake_min,
+            uptake_max=uptake_max,
+            dose_min=dose_min,
+            dose_max=dose_max,
+            uptake_max_precision=uptake_max_precision,
+            dose_max_precision=dose_max_precision,
+            missing=missing,
+            timing_issue=timing_issue,
+            dose_issue=dose_issue,
+            composition=composition,
+            qa_score=qa_score,
+        )
+        studies = _load_index_studies(conn, search_term)
         conn.close()
 
-        if has_filters:
-            studies = [s for s in studies if s['study_instance_uid'] in filtered_study_uids]
-
-        def _split_csv(value: Optional[str]) -> List[str]:
-            if not value:
-                return []
-            return [part.strip() for part in str(value).split(',') if part.strip()]
-
-        if modality_filters:
-            studies = [
-                study for study in studies
-                if set(_split_csv(study.get('modality'))).intersection(modality_filters)
-            ]
-        if manufacturer_filters:
-            studies = [
-                study for study in studies
-                if set(_split_csv(study.get('manufacturer'))).intersection(manufacturer_filters)
-            ]
-        if radiopharmaceutical_filters:
-            studies = [
-                study for study in studies
-                if set(_split_csv(study.get('radiopharmaceutical'))).intersection(radiopharmaceutical_filters)
-            ]
-
-        # Format dates and times
-        for study in studies:
-            if study.get('study_date'):
-                study['study_date_formatted'] = format_date(study['study_date'])
-            if study.get('study_time'):
-                study['study_time_formatted'] = format_time(study['study_time'])
-            study['patient_name_display'] = format_patient_name(study.get('patient_name')) or None
-        
-        return render_template(
-            'index.html',
-            studies=studies,
-            db_name=db_name,
-            databanks=databanks,
-            search_term=search_term,
-            deleted=deleted,
-            deleted_count=deleted_count,
-            uptake_min=uptake_min,
-            uptake_max=uptake_max,
-            dose_min=dose_min,
-            dose_max=dose_max,
-            has_filters=has_filters,
-            modality_filters=modality_filters,
-            available_modalities=available_modalities,
-            manufacturer_filters=manufacturer_filters,
-            available_manufacturers=available_manufacturers,
-            radiopharmaceutical_filters=radiopharmaceutical_filters,
-            available_radiopharmaceuticals=available_radiopharmaceuticals,
-            t=translations,
-            lang=get_language(),
+        if has_filters and filtered_study_uids is not None:
+            studies = [s for s in studies if s["study_instance_uid"] in filtered_study_uids]
+        studies = _apply_category_filters(
+            studies,
+            modality_filters,
+            manufacturer_filters,
+            radiopharmaceutical_filters,
         )
-    except Exception as e:
-        return render_template(
-            'index.html',
-            studies=[],
-            db_name=db_name,
-            databanks=databanks,
-            error=str(e),
-            search_term=search_term,
-            deleted=deleted,
-            deleted_count=deleted_count,
-            uptake_min=uptake_min,
-            uptake_max=uptake_max,
-            dose_min=dose_min,
-            dose_max=dose_max,
-            has_filters=has_filters,
-            modality_filters=modality_filters,
-            available_modalities=[],
-            manufacturer_filters=manufacturer_filters,
-            available_manufacturers=[],
-            radiopharmaceutical_filters=radiopharmaceutical_filters,
-            available_radiopharmaceuticals=[],
-            t=translations,
-            lang=get_language(),
+        studies = _format_index_studies(studies)
+
+        context.update({
+            "studies": studies,
+            "available_modalities": available_modalities,
+            "available_manufacturers": available_manufacturers,
+            "available_radiopharmaceuticals": available_radiopharmaceuticals,
+        })
+        return render_template("index.html", **context)
+    except (sqlite3.Error, ValueError, TypeError) as e:
+        context["error"] = str(e)
+        return render_template("index.html", **context)
+
+
+def _build_study_detail_payload(conn: sqlite3.Connection, study_uid: str) -> Optional[dict]:
+    cursor = conn.execute("""
+        SELECT
+            study_instance_uid,
+            MAX(patient_id) as patient_id,
+            MAX(patient_name) as patient_name,
+            MAX(patient_birth_date) as patient_birth_date,
+            MAX(patient_sex) as patient_sex,
+            MAX(patient_age) as patient_age,
+            MAX(patient_weight) as patient_weight,
+            MAX(patient_size) as patient_size,
+            MAX(study_date) as study_date,
+            MAX(study_time) as study_time,
+            MAX(acquisition_date) as acquisition_date,
+            MAX(acquisition_time) as acquisition_time,
+            MAX(study_description) as study_description,
+            MAX(study_id) as study_id,
+            MAX(accession_number) as accession_number,
+            MAX(referring_physician_name) as referring_physician_name,
+            MAX(manufacturer) as manufacturer,
+            MAX(manufacturer_model_name) as manufacturer_model_name,
+            MAX(institution_name) as institution_name,
+            MAX(ctp_collection) as ctp_collection,
+            MAX(ctp_subject_id) as ctp_subject_id,
+            MAX(ctp_private_flag_raw) as ctp_private_flag_raw,
+            MAX(ctp_private_flag_int) as ctp_private_flag_int,
+            MAX(csa_image_header_json) as csa_image_header_json,
+            MAX(csa_series_header_json) as csa_series_header_json,
+            MAX(csa_image_header_hash) as csa_image_header_hash,
+            MAX(csa_series_header_hash) as csa_series_header_hash
+        FROM dicom_metadata
+        WHERE study_instance_uid = ?
+        GROUP BY study_instance_uid
+    """, (study_uid,))
+    study_row = cursor.fetchone()
+    if not study_row:
+        return None
+    study_info = dict(study_row)
+
+    cursor = conn.execute("""
+        SELECT
+            series_instance_uid,
+            series_number,
+            series_description,
+            series_date,
+            series_time,
+            modality,
+            scan_root,
+            body_part_examined,
+            protocol_name,
+            acquisition_date,
+            acquisition_time,
+            patient_position,
+            scanning_sequence,
+            sequence_variant,
+            scan_options,
+            acquisition_type,
+            injection_time,
+            injection_date,
+            injected_activity,
+            radiopharmaceutical,
+            half_life,
+            decay_correction,
+            radiopharmaceutical_volume,
+            radionuclide_total_dose,
+            image_type,
+            pixel_spacing,
+            slice_thickness,
+            reconstruction_diameter,
+            reconstruction_algorithm,
+            convolution_kernel,
+            filter_type,
+            spiral_pitch_factor,
+            ctdivol,
+            dlp,
+            manufacturer,
+            manufacturer_model_name,
+            software_version,
+            station_name,
+            csa_image_header_json,
+            csa_series_header_json,
+            csa_image_header_hash,
+            csa_series_header_hash,
+            private_payload_fingerprint,
+            image_orientation_patient,
+            slice_location,
+            number_of_frames,
+            frame_time,
+            number_of_slices,
+            file_path
+        FROM dicom_metadata
+        WHERE study_instance_uid = ?
+        ORDER BY series_number ASC, series_time ASC, series_instance_uid ASC
+    """, (study_uid,))
+    series = [dict(row) for row in cursor.fetchall()]
+
+    study_paths = set()
+    study_labels = set()
+    for item in series:
+        abs_path, path_label = resolve_display_path(item.get("scan_root"), item.get("file_path"))
+        if abs_path:
+            item["absolute_file_path"] = abs_path
+            study_paths.add(abs_path)
+        if path_label:
+            item["absolute_path_label"] = path_label
+            study_labels.add(path_label)
+
+    if study_paths:
+        try:
+            common_root = os.path.commonpath(sorted(study_paths))
+        except ValueError:
+            common_root = None
+        study_info["study_absolute_paths"] = [common_root] if common_root else sorted(study_paths)
+    else:
+        study_info["study_absolute_paths"] = []
+    study_info["study_absolute_path_labels"] = sorted(study_labels)
+
+    export_modalities = sorted({item.get("modality") for item in series if item.get("modality")})
+    series_uids = [item.get("series_instance_uid") for item in series if item.get("series_instance_uid")]
+    private_creators: Dict[str, dict] = {}
+    pipeline_tags: Dict[str, List[dict]] = {}
+    rt_tags: Dict[str, List[dict]] = {}
+    pet_dose_reports: Dict[str, List[dict]] = {}
+
+    if series_uids:
+        placeholders = ",".join(["?"] * len(series_uids))
+        cursor = conn.execute(
+            f"""
+            SELECT series_instance_uid, creator, COUNT(*) as tag_count
+            FROM private_tag
+            WHERE series_instance_uid IN ({placeholders})
+            GROUP BY series_instance_uid, creator
+            """,
+            series_uids,
         )
+        for row in cursor.fetchall():
+            private_creators.setdefault(row["series_instance_uid"], {})[row["creator"]] = row["tag_count"]
+
+        cursor = conn.execute(
+            f"""
+            SELECT series_instance_uid, creator, group_hex, element_hex, value_text, value_num, value_hex
+            FROM private_tag
+            WHERE series_instance_uid IN ({placeholders})
+              AND classification = 'pipeline_provenance'
+            ORDER BY series_instance_uid, creator, group_hex, element_hex
+            """,
+            series_uids,
+        )
+        for row in cursor.fetchall():
+            item = dict(row)
+            raw_value = item.get("value_text")
+            if raw_value is None and item.get("value_num") is not None:
+                raw_value = str(item["value_num"])
+            formatted = format_private_timestamp(raw_value) if raw_value else None
+            item["display_value"] = formatted or raw_value or item.get("value_hex")
+            pipeline_tags.setdefault(item["series_instance_uid"], []).append(item)
+
+        cursor = conn.execute(
+            f"""
+            SELECT series_instance_uid, creator, group_hex, element_hex, value_text, value_num, value_hex
+            FROM private_tag
+            WHERE series_instance_uid IN ({placeholders})
+              AND classification = 'rt_provenance'
+            ORDER BY series_instance_uid, creator, group_hex, element_hex
+            """,
+            series_uids,
+        )
+        for row in cursor.fetchall():
+            item = dict(row)
+            raw_value = item.get("value_text")
+            if raw_value is None and item.get("value_num") is not None:
+                raw_value = str(item["value_num"])
+            formatted = format_private_timestamp(raw_value) if raw_value else None
+            item["display_value"] = formatted or raw_value or item.get("value_hex")
+            rt_tags.setdefault(item["series_instance_uid"], []).append(item)
+
+        cursor = conn.execute(
+            f"""
+            SELECT series_instance_uid, value_text
+            FROM private_tag
+            WHERE series_instance_uid IN ({placeholders})
+              AND creator = 'SIEMENS CSA HEADER'
+              AND value_text LIKE '%<PetDoseReportData%'
+            """,
+            series_uids,
+        )
+        for row in cursor.fetchall():
+            entries = parse_pet_dose_report(row["value_text"])
+            if entries:
+                pet_dose_reports[row["series_instance_uid"]] = entries
+
+    if study_info.get("study_date"):
+        study_info["study_date_formatted"] = format_date(study_info["study_date"])
+    if study_info.get("study_time"):
+        study_info["study_time_formatted"] = format_time(study_info["study_time"])
+    if study_info.get("patient_birth_date"):
+        study_info["patient_birth_date_formatted"] = format_date(study_info["patient_birth_date"])
+    study_info["patient_name_display"] = format_patient_name(study_info.get("patient_name")) or None
+
+    if study_info.get("patient_weight") and study_info.get("patient_size"):
+        height_m = study_info["patient_size"]
+        if height_m and height_m > 0:
+            study_info["bmi"] = study_info["patient_weight"] / (height_m * height_m)
+            study_info["height_cm"] = height_m * 100
+
+    for item in series:
+        creator_counts = private_creators.get(item.get("series_instance_uid"), {})
+        item["private_creators"] = dict(sorted(creator_counts.items(), key=lambda x: x[1], reverse=True))
+        item["pipeline_provenance"] = pipeline_tags.get(item.get("series_instance_uid"), [])
+        item["rt_provenance"] = rt_tags.get(item.get("series_instance_uid"), [])
+        item["pet_dose_report"] = pet_dose_reports.get(item.get("series_instance_uid"))
+
+        if item.get("series_date"):
+            item["series_date_formatted"] = format_date(item["series_date"])
+        if item.get("series_time"):
+            item["series_time_formatted"] = format_time(item["series_time"])
+        if item.get("acquisition_date"):
+            item["acquisition_date_formatted"] = format_date(item["acquisition_date"])
+        if item.get("acquisition_time"):
+            item["acquisition_time_formatted"] = format_time(item["acquisition_time"])
+            if study_info.get("study_time"):
+                try:
+                    study_hours = int(str(study_info["study_time"])[:2])
+                    acq_hours = int(str(item["acquisition_time"])[:2])
+                    if study_hours >= 22 and acq_hours <= 6:
+                        item["acquisition_likely_next_day"] = True
+                except (TypeError, ValueError):
+                    pass
+        if item.get("injection_date"):
+            item["injection_date_formatted"] = format_date(item["injection_date"])
+        if item.get("injection_time"):
+            item["injection_time_formatted"] = format_time(item["injection_time"])
+
+        injection_date_to_use = item.get("injection_date") or study_info.get("study_date")
+        acquisition_date_to_use = item.get("acquisition_date") or study_info.get("study_date")
+        if (
+            injection_date_to_use and item.get("injection_time")
+            and acquisition_date_to_use and item.get("acquisition_time")
+        ):
+            delay_minutes, _ = calculate_injection_delay(
+                injection_date_to_use,
+                item["injection_time"],
+                acquisition_date_to_use,
+                item["acquisition_time"],
+                injection_date_missing=(item.get("injection_date") is None),
+                study_time=study_info.get("study_time"),
+            )
+            if delay_minutes:
+                item["injection_delay"] = format_delay(delay_minutes)
+                item["injection_delay_minutes"] = delay_minutes
+
+        if item.get("injected_activity") and study_info.get("patient_weight"):
+            item["activity_per_kg"] = item["injected_activity"] / study_info["patient_weight"]
+
+        if item.get("injected_activity") and item.get("half_life") and item.get("injection_delay_minutes"):
+            injected_activity_bq = item["injected_activity"]
+            if injected_activity_bq < 1e6:
+                injected_activity_bq = injected_activity_bq * 1e6
+            remaining_activity = calculate_activity_at_scan(
+                injected_activity_bq,
+                item["half_life"],
+                item["injection_delay_minutes"],
+            )
+            if remaining_activity:
+                item["activity_at_scan"] = remaining_activity
+                if injected_activity_bq > 0:
+                    item["decay_percent"] = (1 - remaining_activity / injected_activity_bq) * 100
+
+    return {
+        "study_info": study_info,
+        "series": series,
+        "export_modalities": export_modalities,
+    }
 
 
 @app.route('/study/<study_uid>')
 def study_detail(study_uid):
     """Study detail page - show all series in a study"""
-    # Handle language setting
     lang = request.args.get('lang')
     if lang and lang in ['en', 'de']:
         session['language'] = lang
-    
+
     db_name = normalize_db_name(request.args.get('db'))
     db_path = resolve_db_path(db_name)
     translations = get_translations()
     export_sections, _ = build_export_sections(translations)
     databanks = list_databanks()
-    
+
     if not os.path.exists(db_path):
         return f"Database not found: {db_path}", 404
-    
+
+    conn = None
     try:
         conn = get_db_connection(db_path)
-        
-        # Get study summary - aggregate patient info from all files in study
-        # Use MAX() to get first non-null value for each field (works because same patient should have same values)
-        cursor = conn.execute("""
-            SELECT 
-                study_instance_uid,
-                MAX(patient_id) as patient_id,
-                MAX(patient_name) as patient_name,
-                MAX(patient_birth_date) as patient_birth_date,
-                MAX(patient_sex) as patient_sex,
-                MAX(patient_age) as patient_age,
-                MAX(patient_weight) as patient_weight,
-                MAX(patient_size) as patient_size,
-                MAX(study_date) as study_date,
-                MAX(study_time) as study_time,
-                MAX(acquisition_date) as acquisition_date,
-                MAX(acquisition_time) as acquisition_time,
-                MAX(study_description) as study_description,
-                MAX(study_id) as study_id,
-                MAX(accession_number) as accession_number,
-                MAX(referring_physician_name) as referring_physician_name,
-                MAX(manufacturer) as manufacturer,
-                MAX(manufacturer_model_name) as manufacturer_model_name,
-                MAX(institution_name) as institution_name,
-                MAX(ctp_collection) as ctp_collection,
-                MAX(ctp_subject_id) as ctp_subject_id,
-                MAX(ctp_private_flag_raw) as ctp_private_flag_raw,
-                MAX(ctp_private_flag_int) as ctp_private_flag_int,
-                MAX(csa_image_header_json) as csa_image_header_json,
-                MAX(csa_series_header_json) as csa_series_header_json,
-                MAX(csa_image_header_hash) as csa_image_header_hash,
-                MAX(csa_series_header_hash) as csa_series_header_hash
-            FROM dicom_metadata
-            WHERE study_instance_uid = ?
-            GROUP BY study_instance_uid
-        """, (study_uid,))
-        study_info = cursor.fetchone()
-        
-        if not study_info:
-            conn.close()
+        payload = _build_study_detail_payload(conn, study_uid)
+        if not payload:
             return f"Study not found: {study_uid}", 404
-        
-        study_info = dict(study_info)
-        
-        # Get all series for this study (one row per series).
-        cursor = conn.execute("""
-            SELECT 
-                series_instance_uid,
-                series_number,
-                series_description,
-                series_date,
-                series_time,
-                modality,
-                scan_root,
-                body_part_examined,
-                protocol_name,
-                acquisition_date,
-                acquisition_time,
-                patient_position,
-                scanning_sequence,
-                sequence_variant,
-                scan_options,
-                acquisition_type,
-                injection_time,
-                injection_date,
-                injected_activity,
-                radiopharmaceutical,
-                half_life,
-                decay_correction,
-                radiopharmaceutical_volume,
-                radionuclide_total_dose,
-                image_type,
-                pixel_spacing,
-                slice_thickness,
-                reconstruction_diameter,
-                reconstruction_algorithm,
-                convolution_kernel,
-                filter_type,
-                spiral_pitch_factor,
-                ctdivol,
-                dlp,
-                manufacturer,
-                manufacturer_model_name,
-                software_version,
-                station_name,
-                csa_image_header_json,
-                csa_series_header_json,
-                csa_image_header_hash,
-                csa_series_header_hash,
-                private_payload_fingerprint,
-                image_orientation_patient,
-                slice_location,
-                number_of_frames,
-                frame_time,
-                number_of_slices,
-                file_path
-            FROM dicom_metadata
-            WHERE study_instance_uid = ?
-            ORDER BY series_number ASC, series_time ASC, series_instance_uid ASC
-        """, (study_uid,))
-        series = [dict(row) for row in cursor.fetchall()]
-        study_paths = set()
-        study_labels = set()
-        for s in series:
-            abs_path, path_label = resolve_display_path(s.get("scan_root"), s.get("file_path"))
-            if abs_path:
-                s["absolute_file_path"] = abs_path
-                study_paths.add(abs_path)
-            if path_label:
-                s["absolute_path_label"] = path_label
-                study_labels.add(path_label)
-        if study_paths:
-            try:
-                common_root = os.path.commonpath(sorted(study_paths))
-            except Exception:
-                common_root = None
-            if common_root:
-                study_info["study_absolute_paths"] = [common_root]
-            else:
-                study_info["study_absolute_paths"] = sorted(study_paths)
-        else:
-            study_info["study_absolute_paths"] = []
-        study_info["study_absolute_path_labels"] = sorted(study_labels)
-        export_modalities = sorted({
-            s.get('modality') for s in series if s.get('modality')
-        })
-        series_uids = [s.get("series_instance_uid") for s in series if s.get("series_instance_uid")]
-        private_creators = {}
-        pipeline_tags = {}
-        rt_tags = {}
-        if series_uids:
-            placeholders = ",".join(["?"] * len(series_uids))
-            cursor = conn.execute(
-                f"""
-                SELECT series_instance_uid, creator, COUNT(*) as tag_count
-                FROM private_tag
-                WHERE series_instance_uid IN ({placeholders})
-                GROUP BY series_instance_uid, creator
-                """,
-                series_uids,
-            )
-            for row in cursor.fetchall():
-                private_creators.setdefault(row["series_instance_uid"], {})[row["creator"]] = row["tag_count"]
-
-            cursor = conn.execute(
-                f"""
-                SELECT series_instance_uid, creator, group_hex, element_hex, value_text, value_num, value_hex
-                FROM private_tag
-                WHERE series_instance_uid IN ({placeholders})
-                  AND classification = 'pipeline_provenance'
-                ORDER BY series_instance_uid, creator, group_hex, element_hex
-                """,
-                series_uids,
-            )
-            for row in cursor.fetchall():
-                item = dict(row)
-                raw_value = item.get("value_text")
-                if raw_value is None and item.get("value_num") is not None:
-                    raw_value = str(item["value_num"])
-                formatted = format_private_timestamp(raw_value) if raw_value else None
-                item["display_value"] = formatted or raw_value or item.get("value_hex")
-                pipeline_tags.setdefault(item["series_instance_uid"], []).append(item)
-
-            cursor = conn.execute(
-                f"""
-                SELECT series_instance_uid, creator, group_hex, element_hex, value_text, value_num, value_hex
-                FROM private_tag
-                WHERE series_instance_uid IN ({placeholders})
-                  AND classification = 'rt_provenance'
-                ORDER BY series_instance_uid, creator, group_hex, element_hex
-                """,
-                series_uids,
-            )
-            for row in cursor.fetchall():
-                item = dict(row)
-                raw_value = item.get("value_text")
-                if raw_value is None and item.get("value_num") is not None:
-                    raw_value = str(item["value_num"])
-                formatted = format_private_timestamp(raw_value) if raw_value else None
-                item["display_value"] = formatted or raw_value or item.get("value_hex")
-                rt_tags.setdefault(item["series_instance_uid"], []).append(item)
-
-            cursor = conn.execute(
-                f"""
-                SELECT series_instance_uid, value_text
-                FROM private_tag
-                WHERE series_instance_uid IN ({placeholders})
-                  AND creator = 'SIEMENS CSA HEADER'
-                  AND value_text LIKE '%<PetDoseReportData%'
-                """,
-                series_uids,
-            )
-            pet_dose_reports = {}
-            for row in cursor.fetchall():
-                entries = parse_pet_dose_report(row["value_text"])
-                if entries:
-                    pet_dose_reports[row["series_instance_uid"]] = entries
-        
-        conn.close()
-
-        # Format dates and times
-        if study_info.get('study_date'):
-            study_info['study_date_formatted'] = format_date(study_info['study_date'])
-        if study_info.get('study_time'):
-            study_info['study_time_formatted'] = format_time(study_info['study_time'])
-        # Note: Acquisition date/time removed from study level - 
-        # different series can have different acquisition times, 
-        # so we show them per-series in the series table instead
-        if study_info.get('patient_birth_date'):
-            study_info['patient_birth_date_formatted'] = format_date(study_info['patient_birth_date'])
-        
-        study_info['patient_name_display'] = format_patient_name(study_info.get('patient_name')) or None
-        
-        # Calculate derived metrics (removed study-level nuclear medicine calculations)
-        # Note: Nuclear medicine information is now per-series (see series loop below)
-        
-        # 5. BMI calculation (BMI = weight / height²)
-        if study_info.get('patient_weight') and study_info.get('patient_size'):
-            height_m = study_info['patient_size']
-            if height_m and height_m > 0:
-                bmi = study_info['patient_weight'] / (height_m * height_m)
-                study_info['bmi'] = bmi
-                study_info['height_cm'] = height_m * 100  # Convert to cm for display
-        
-        for s in series:
-            creator_counts = private_creators.get(s.get("series_instance_uid"), {})
-            s["private_creators"] = dict(sorted(creator_counts.items(), key=lambda x: x[1], reverse=True))
-            s["pipeline_provenance"] = pipeline_tags.get(s.get("series_instance_uid"), [])
-            s["rt_provenance"] = rt_tags.get(s.get("series_instance_uid"), [])
-            s["pet_dose_report"] = pet_dose_reports.get(s.get("series_instance_uid"))
-            if s.get('series_date'):
-                s['series_date_formatted'] = format_date(s['series_date'])
-            if s.get('series_time'):
-                s['series_time_formatted'] = format_time(s['series_time'])
-            if s.get('acquisition_date'):
-                s['acquisition_date_formatted'] = format_date(s['acquisition_date'])
-            if s.get('acquisition_time'):
-                s['acquisition_time_formatted'] = format_time(s['acquisition_time'])
-                
-                # Check if acquisition time suggests next day
-                if study_info.get('study_time') and s.get('acquisition_time'):
-                    try:
-                        study_hours = int(str(study_info['study_time'])[:2])
-                        acq_hours = int(str(s['acquisition_time'])[:2])
-                        # If study is late (>= 22:00) and acquisition is early (<= 06:00), likely next day
-                        if study_hours >= 22 and acq_hours <= 6:
-                            s['acquisition_likely_next_day'] = True
-                    except:
-                        pass
-            if s.get('injection_date'):
-                s['injection_date_formatted'] = format_date(s['injection_date'])
-            if s.get('injection_time'):
-                s['injection_time_formatted'] = format_time(s['injection_time'])
-            
-            # Calculate injection-to-acquisition delay for this series
-            # Use study_date as fallback if injection_date is missing (injection usually same day as study)
-            # Use acquisition_date as primary, study_date as fallback
-            injection_date_to_use = s.get('injection_date') or study_info.get('study_date')
-            acquisition_date_to_use = s.get('acquisition_date') or study_info.get('study_date')
-            
-            if (injection_date_to_use and s.get('injection_time') and 
-                acquisition_date_to_use and s.get('acquisition_time')):
-                delay_minutes, _ = calculate_injection_delay(
-                    injection_date_to_use,
-                    s['injection_time'],
-                    acquisition_date_to_use,
-                    s['acquisition_time'],
-                    injection_date_missing=(s.get('injection_date') is None),
-                    study_time=study_info.get('study_time')
-                )
-                if delay_minutes:
-                    s['injection_delay'] = format_delay(delay_minutes)
-                    s['injection_delay_minutes'] = delay_minutes
-            
-            # Calculate activity per kg body weight for this series
-            if s.get('injected_activity') and study_info.get('patient_weight'):
-                activity_per_kg = s['injected_activity'] / study_info['patient_weight']
-                s['activity_per_kg'] = activity_per_kg
-            
-            # Calculate remaining activity at scan time for this series
-            # Use the injection delay we calculated above
-            if (s.get('injected_activity') and s.get('half_life') and 
-                s.get('injection_delay_minutes')):
-                # Convert injected_activity to Bq if it's in MBq (DICOM standard stores in MBq)
-                # Values > 1e6 are already in Bq, values < 1e6 are in MBq
-                injected_activity_bq = s['injected_activity']
-                if injected_activity_bq < 1e6:
-                    # Value is in MBq, convert to Bq
-                    injected_activity_bq = injected_activity_bq * 1e6
-                
-                remaining_activity = calculate_activity_at_scan(
-                    injected_activity_bq,
-                    s['half_life'],
-                    s['injection_delay_minutes']
-                )
-                if remaining_activity:
-                    s['activity_at_scan'] = remaining_activity
-                    if injected_activity_bq > 0:
-                        decay_percent = (1 - remaining_activity / injected_activity_bq) * 100
-                        s['decay_percent'] = decay_percent
-        
-        return render_template('study_detail.html', 
-                             study_info=study_info, 
-                             series=series,
-                             db_name=db_name,
-                             databanks=databanks,
-                             export_sections=export_sections,
-                             export_modalities=export_modalities,
-                             t=translations,
-                             lang=get_language())
-    except Exception as e:
+        return render_template(
+            'study_detail.html',
+            study_info=payload["study_info"],
+            series=payload["series"],
+            db_name=db_name,
+            databanks=databanks,
+            export_sections=export_sections,
+            export_modalities=payload["export_modalities"],
+            t=translations,
+            lang=get_language(),
+        )
+    except (sqlite3.Error, ValueError, TypeError) as e:
         return f"Error: {str(e)}", 500
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.route('/study/<study_uid>/export.csv')
@@ -1727,24 +1817,24 @@ def delete_study(study_uid):
     """Delete a study and all its series from the database"""
     db_name = normalize_db_name(request.args.get('db'))
     db_path = resolve_db_path(db_name)
-    
+
     if not os.path.exists(db_path):
         return f"Database not found: {db_path}", 404
-    
+
     try:
         conn = get_db_connection(db_path)
-        
+
         # Check if study exists
         cursor = conn.execute(
             "SELECT COUNT(*) FROM dicom_metadata WHERE study_instance_uid = ?",
             (study_uid,)
         )
         count = cursor.fetchone()[0]
-        
+
         if count == 0:
             conn.close()
             return f"Study not found: {study_uid}", 404
-        
+
         # Delete all series in this study
         cursor = conn.execute(
             "DELETE FROM dicom_metadata WHERE study_instance_uid = ?",
@@ -1753,11 +1843,11 @@ def delete_study(study_uid):
         deleted_count = cursor.rowcount
         conn.commit()
         conn.close()
-        
+
         # Redirect back to index page with success message
-        from flask import redirect, url_for
+        from flask import redirect
         return redirect(f"/?db={db_name}&deleted=1&count={deleted_count}")
-    
+
     except Exception as e:
         return f"Error deleting study: {str(e)}", 500
 
@@ -1768,31 +1858,31 @@ def upload_file():
     try:
         if 'file' not in request.files:
             return jsonify({'success': False, 'message': 'No file provided'}), 400
-        
+
         file = request.files['file']
         db_name = normalize_db_name(request.form.get('db'))
         db_path = resolve_db_path(db_name)
-        
+
         if file.filename == '':
             return jsonify({'success': False, 'message': 'No file selected'}), 400
-        
+
         # Check file extension
         filename = file.filename.lower()
         if not (filename.endswith('.zip') or filename.endswith('.7z')):
             return jsonify({'success': False, 'message': 'Only ZIP and 7Z files are supported'}), 400
-        
+
         # Create temporary directory for extraction
         temp_dir = tempfile.mkdtemp(prefix='dicom_upload_')
-        
+
         try:
             # Save uploaded file
             uploaded_path = os.path.join(temp_dir, file.filename)
             file.save(uploaded_path)
-            
+
             # Extract archive into a temporary folder (cleaned up after processing)
             extract_dir = os.path.join(temp_dir, 'extracted')
             os.makedirs(extract_dir, exist_ok=True)
-            
+
             if filename.endswith('.zip'):
                 # Extract ZIP file
                 with zipfile.ZipFile(uploaded_path, 'r') as zip_ref:
@@ -1813,10 +1903,10 @@ def upload_file():
                     )
                     if result.returncode != 0:
                         return jsonify({
-                            'success': False, 
-                            'message': f'Failed to extract 7Z file. Install py7zr (pip install py7zr) or system 7z command.'
+                            'success': False,
+                            'message': 'Failed to extract 7Z file. Install py7zr (pip install py7zr) or system 7z command.'
                         }), 400
-            
+
             # Process extracted DICOM files using existing process_directory function
             # This will handle all the processing, deduplication, and counting
             try:
@@ -1827,25 +1917,25 @@ def upload_file():
                     auto_workers=True,
                     scan_root_label=f"zip:{Path(file.filename).name}",
                 )
-                
+
                 return jsonify({
                     'success': True,
-                    'message': f'Archive processed successfully. Check the studies list below.'
+                    'message': 'Archive processed successfully. Check the studies list below.'
                 })
-                
+
             except Exception as e:
                 return jsonify({
                     'success': False,
                     'message': f'Error processing DICOM files: {str(e)}'
                 }), 500
-        
+
         finally:
             # Clean up temporary upload directory
             try:
                 shutil.rmtree(temp_dir)
             except Exception as e:
                 print(f"Warning: Failed to clean up temp directory {temp_dir}: {e}")
-    
+
     except Exception as e:
         return jsonify({
             'success': False,
@@ -1853,29 +1943,565 @@ def upload_file():
         }), 500
 
 
+def _build_dashboard_payload(
+    study_summary: List[dict],
+    study_modalities: Dict[str, set],
+    representative_series_rows: List[dict],
+    db_path: str,
+) -> dict:
+    IDEAL_UPTAKE_TIME_MINUTES = 60
+    IDEAL_DOSE_PER_KG_MBQ = 3.0
+
+    uptake_times = []
+    doses_per_kg = []
+    activities_mbq = []
+    scan_durations = []
+    radiopharmaceuticals = {}
+    radiopharm_total_series = 0
+    manufacturers = {}
+    modality_stats = {}
+    radiopharm_stats = {}
+    ct_dose_by_modality = {}
+
+    for row_dict in representative_series_rows:
+        modality = row_dict.get('modality') or 'Unknown'
+        radiopharm = row_dict.get('radiopharmaceutical') or 'Unknown'
+        modality_bucket = modality_stats.setdefault(modality, {
+            "count": 0,
+            "uptake_times": [],
+            "doses_per_kg": [],
+            "missing_weight": 0,
+            "missing_injection_time": 0,
+            "missing_acquisition_time": 0,
+        })
+        radiopharm_bucket = None
+        if is_radiopharm_modality(modality):
+            radiopharm_bucket = radiopharm_stats.setdefault(radiopharm, {
+                "count": 0,
+                "uptake_times": [],
+                "doses_per_kg": [],
+                "missing_weight": 0,
+                "missing_injection_time": 0,
+                "missing_acquisition_time": 0,
+            })
+            radiopharm_bucket["count"] += 1
+            radiopharm_total_series += 1
+        modality_bucket["count"] += 1
+
+        if (row_dict.get('injection_date') or row_dict.get('study_date')) and row_dict.get('injection_time') and \
+           (row_dict.get('acquisition_date') or row_dict.get('study_date')) and row_dict.get('acquisition_time'):
+            injection_date = row_dict.get('injection_date') or row_dict.get('study_date')
+            acquisition_date = row_dict.get('acquisition_date') or row_dict.get('study_date')
+            delay_minutes, _ = calculate_injection_delay(
+                injection_date,
+                row_dict['injection_time'],
+                acquisition_date,
+                row_dict['acquisition_time'],
+                injection_date_missing=(row_dict.get('injection_date') is None),
+            )
+            if delay_minutes and delay_minutes > 0:
+                uptake_times.append(delay_minutes)
+                modality_bucket["uptake_times"].append(delay_minutes)
+                if radiopharm_bucket is not None:
+                    radiopharm_bucket["uptake_times"].append(delay_minutes)
+        else:
+            modality_bucket["missing_injection_time"] += 1
+            if radiopharm_bucket is not None:
+                radiopharm_bucket["missing_injection_time"] += 1
+
+        if not (row_dict.get('acquisition_time') and (row_dict.get('acquisition_date') or row_dict.get('study_date'))):
+            modality_bucket["missing_acquisition_time"] += 1
+            if radiopharm_bucket is not None:
+                radiopharm_bucket["missing_acquisition_time"] += 1
+
+        patient_weight = get_patient_weight(row_dict)
+        injected_activity = parse_db_float(row_dict.get('injected_activity'))
+        if patient_weight is not None and injected_activity is not None and patient_weight > 0:
+            activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
+            dose_per_kg = activity_mbq / patient_weight
+            if 0 < dose_per_kg < 100:
+                doses_per_kg.append(dose_per_kg)
+                activities_mbq.append(activity_mbq)
+                modality_bucket["doses_per_kg"].append(dose_per_kg)
+                if radiopharm_bucket is not None:
+                    radiopharm_bucket["doses_per_kg"].append(dose_per_kg)
+        else:
+            modality_bucket["missing_weight"] += 1
+            if radiopharm_bucket is not None:
+                radiopharm_bucket["missing_weight"] += 1
+
+        series_time = row_dict.get('series_time')
+        acquisition_time = row_dict.get('acquisition_time')
+        if series_time and acquisition_time:
+            series_seconds = parse_time_to_seconds(series_time)
+            acquisition_seconds = parse_time_to_seconds(acquisition_time)
+            if series_seconds is not None and acquisition_seconds is not None:
+                duration = (acquisition_seconds - series_seconds) / 60
+                if 0 <= duration <= 480:
+                    scan_durations.append(duration)
+
+        if is_radiopharm_modality(modality) and row_dict.get('radiopharmaceutical'):
+            rad = row_dict['radiopharmaceutical']
+            radiopharmaceuticals[rad] = radiopharmaceuticals.get(rad, 0) + 1
+        if row_dict.get('manufacturer'):
+            mfr = row_dict['manufacturer']
+            manufacturers[mfr] = manufacturers.get(mfr, 0) + 1
+
+        if row_dict.get('ctdivol') is not None or row_dict.get('dlp') is not None:
+            ct_bucket = ct_dose_by_modality.setdefault(modality, {"ctdivol": [], "dlp": [], "count": 0})
+            if row_dict.get('ctdivol') is not None:
+                ct_bucket["ctdivol"].append(row_dict["ctdivol"])
+            if row_dict.get('dlp') is not None:
+                ct_bucket["dlp"].append(row_dict["dlp"])
+            ct_bucket["count"] += 1
+
+    def safe_float(value):
+        return float(value) if value is not None else None
+
+    def safe_stats(values):
+        if not values:
+            return {"count": 0, "mean": None, "median": None, "std_dev": None, "min": None, "max": None}
+        return {
+            "count": len(values),
+            "mean": safe_float(statistics.mean(values)),
+            "median": safe_float(statistics.median(values)),
+            "std_dev": safe_float(statistics.stdev(values)) if len(values) > 1 else None,
+            "min": safe_float(min(values)),
+            "max": safe_float(max(values)),
+        }
+
+    total_series = len(representative_series_rows)
+    total_studies = len(study_summary)
+    redo_total = len(representative_series_rows)
+    redo_with_repeats = 0
+
+    def parse_age_years(value: Optional[object]) -> Optional[int]:
+        if not value:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        digits = "".join([c for c in text if c.isdigit()])
+        if not digits:
+            return None
+        try:
+            return int(digits)
+        except ValueError:
+            return None
+
+    age_buckets = {"0-17": 0, "18-39": 0, "40-59": 0, "60-79": 0, "80+": 0}
+    sex_counts = {}
+    missing_weight = 0
+    missing_height = 0
+    missing_birth_date = 0
+    ctp_flagged = 0
+    study_dates = {}
+    study_hours = {}
+    for study in study_summary:
+        sex = study.get("patient_sex") or "Unknown"
+        sex_counts[sex] = sex_counts.get(sex, 0) + 1
+        age_years = parse_age_years(study.get("patient_age"))
+        if age_years is not None:
+            if age_years <= 17:
+                age_buckets["0-17"] += 1
+            elif age_years <= 39:
+                age_buckets["18-39"] += 1
+            elif age_years <= 59:
+                age_buckets["40-59"] += 1
+            elif age_years <= 79:
+                age_buckets["60-79"] += 1
+            else:
+                age_buckets["80+"] += 1
+        if parse_db_float(study.get("patient_weight")) is None:
+            missing_weight += 1
+        if parse_db_float(study.get("patient_size")) is None:
+            missing_height += 1
+        if not study.get("patient_birth_date"):
+            missing_birth_date += 1
+        if study.get("ctp_collection") or study.get("ctp_subject_id") or study.get("ctp_private_flag_raw") or study.get("ctp_private_flag_int") is not None:
+            ctp_flagged += 1
+        if study.get("study_date"):
+            study_dates[study["study_date"]] = study_dates.get(study["study_date"], 0) + 1
+        if study.get("study_time"):
+            time_parsed = parse_time_to_24hour(study["study_time"])
+            if time_parsed:
+                study_hours[time_parsed[0]] = study_hours.get(time_parsed[0], 0) + 1
+
+    def summarize_group(group_data):
+        results = {}
+        for key, data in group_data.items():
+            uptake = safe_stats(data["uptake_times"])
+            dose = safe_stats(data["doses_per_kg"])
+            results[key] = {
+                "count": data["count"],
+                "uptake_mean": uptake["mean"],
+                "uptake_median": uptake["median"],
+                "uptake_within": len([t for t in data["uptake_times"] if 45 <= t <= 75]),
+                "dose_mean": dose["mean"],
+                "dose_median": dose["median"],
+                "dose_within": len([d for d in data["doses_per_kg"] if 2.5 <= d <= 3.5]),
+                "missing_weight": data["missing_weight"],
+                "missing_injection_time": data["missing_injection_time"],
+                "missing_acquisition_time": data["missing_acquisition_time"],
+            }
+        return results
+
+    modality_summary = summarize_group(modality_stats)
+    radiopharm_summary = summarize_group(radiopharm_stats)
+    missing_series_weight = sum(group["missing_weight"] for group in modality_stats.values())
+    missing_series_injection = sum(group["missing_injection_time"] for group in modality_stats.values())
+    missing_series_acquisition = sum(group["missing_acquisition_time"] for group in modality_stats.values())
+
+    ct_summary = {}
+    for modality, values in ct_dose_by_modality.items():
+        ctdivol_stats = safe_stats(values["ctdivol"])
+        dlp_stats = safe_stats(values["dlp"])
+        ct_summary[modality] = {
+            "count": values["count"],
+            "ctdivol_mean": ctdivol_stats["mean"],
+            "ctdivol_median": ctdivol_stats["median"],
+            "dlp_mean": dlp_stats["mean"],
+            "dlp_median": dlp_stats["median"],
+        }
+
+    stats = {
+        'total_series': total_series,
+        'total_studies': total_studies,
+        'uptake_time': {
+            'count': len(uptake_times),
+            'mean': safe_float(statistics.mean(uptake_times)) if uptake_times else None,
+            'median': safe_float(statistics.median(uptake_times)) if uptake_times else None,
+            'std_dev': safe_float(statistics.stdev(uptake_times)) if len(uptake_times) > 1 else None,
+            'min': safe_float(min(uptake_times)) if uptake_times else None,
+            'max': safe_float(max(uptake_times)) if uptake_times else None,
+            'ideal': IDEAL_UPTAKE_TIME_MINUTES,
+            'within_ideal_range': len([t for t in uptake_times if 45 <= t <= 75]) if uptake_times else 0,
+        },
+        'dose_per_kg': {
+            'count': len(doses_per_kg),
+            'mean': safe_float(statistics.mean(doses_per_kg)) if doses_per_kg else None,
+            'median': safe_float(statistics.median(doses_per_kg)) if doses_per_kg else None,
+            'std_dev': safe_float(statistics.stdev(doses_per_kg)) if len(doses_per_kg) > 1 else None,
+            'min': safe_float(min(doses_per_kg)) if doses_per_kg else None,
+            'max': safe_float(max(doses_per_kg)) if doses_per_kg else None,
+            'ideal': IDEAL_DOSE_PER_KG_MBQ,
+            'within_ideal_range': len([d for d in doses_per_kg if 2.5 <= d <= 3.5]) if doses_per_kg else 0,
+        },
+        'radiopharmaceuticals': dict(sorted(radiopharmaceuticals.items(), key=lambda x: x[1], reverse=True)[:10]),
+        'radiopharmaceutical_total_series': radiopharm_total_series,
+        'manufacturers': dict(sorted(manufacturers.items(), key=lambda x: x[1], reverse=True)[:10]),
+        'scan_duration': safe_stats(scan_durations),
+        'redo_rate': {"total": redo_total, "repeats": redo_with_repeats},
+        'missingness': {
+            "weight": missing_weight,
+            "height": missing_height,
+            "birth_date": missing_birth_date,
+            "series_weight": missing_series_weight,
+            "series_injection_time": missing_series_injection,
+            "series_acquisition_time": missing_series_acquisition,
+        },
+        'ctp_flagged': ctp_flagged,
+        'sex_counts': sex_counts,
+        'age_buckets': age_buckets,
+        'study_dates': dict(sorted(study_dates.items(), reverse=True)[:10]),
+        'study_hours': dict(sorted(study_hours.items())),
+        'modality_summary': dict(sorted(modality_summary.items(), key=lambda x: x[1]["count"], reverse=True)),
+        'radiopharm_summary': dict(sorted(radiopharm_summary.items(), key=lambda x: x[1]["count"], reverse=True)),
+        'ct_summary': dict(sorted(ct_summary.items(), key=lambda x: x[1]["count"], reverse=True)),
+    }
+
+    csa_series_counts = {}
+    for row in representative_series_rows:
+        csa_series = row.get("csa_series_header_hash")
+        if csa_series:
+            csa_series_counts[csa_series] = csa_series_counts.get(csa_series, 0) + 1
+    majority_csa = max(csa_series_counts, key=csa_series_counts.get) if csa_series_counts else None
+
+    representative_study_uids = {row.get("study_instance_uid") for row in representative_series_rows if row.get("study_instance_uid")}
+    study_total = len(representative_study_uids)
+    completeness_counts = {
+        "weight": 0, "dose": 0, "injection_time": 0, "acquisition_time": 0,
+        "radiopharmaceutical": 0, "patient_sex": 0, "patient_age": 0,
+    }
+    radiopharm_study_total = 0
+    summary_by_uid = {study["study_instance_uid"]: study for study in study_summary if study.get("study_instance_uid")}
+    study_flags = {}
+    for study_uid in representative_study_uids:
+        study = summary_by_uid.get(study_uid, {})
+        study_flags[study_uid] = {
+            "weight": parse_db_float(study.get("patient_weight")) is not None,
+            "patient_sex": bool(study.get("patient_sex")),
+            "patient_age": bool(study.get("patient_age") or study.get("patient_birth_date")),
+            "dose": False, "injection_time": False, "acquisition_time": False, "radiopharmaceutical": False,
+        }
+        modalities = study_modalities.get(study_uid, set())
+        if any(is_radiopharm_modality(m or "") for m in modalities):
+            radiopharm_study_total += 1
+
+    for row in representative_series_rows:
+        study_uid = row.get("study_instance_uid")
+        if not study_uid or study_uid not in study_flags:
+            continue
+        modality = row.get("modality") or ""
+        if is_radiopharm_modality(modality):
+            if parse_db_float(row.get("injected_activity")) is not None:
+                study_flags[study_uid]["dose"] = True
+            if row.get("injection_time"):
+                study_flags[study_uid]["injection_time"] = True
+        if row.get("acquisition_time"):
+            study_flags[study_uid]["acquisition_time"] = True
+        if is_radiopharm_modality(modality) and has_radiopharm(row):
+            study_flags[study_uid]["radiopharmaceutical"] = True
+    for flags in study_flags.values():
+        for key in completeness_counts:
+            if flags.get(key):
+                completeness_counts[key] += 1
+
+    timing_counts = {"negative": 0, "too_long": 0, "parse_fail": 0, "missing": 0, "study_time_conflict": 0}
+    for row in representative_series_rows:
+        _, status = compute_delay_status(row)
+        if status in timing_counts:
+            timing_counts[status] += 1
+        if has_time_conflict(row):
+            timing_counts["study_time_conflict"] += 1
+
+    dose_values = []
+    missing_activity_has_weight = 0
+    missing_weight_has_activity = 0
+    possible_unit_mismatch = 0
+    radiopharm_dose_total = 0
+    for row in representative_series_rows:
+        modality = row.get("modality") or ""
+        if not is_radiopharm_modality(modality):
+            continue
+        radiopharm_dose_total += 1
+        dose_per_kg, _ = compute_dose_from_row(row)
+        injected_activity = parse_db_float(row.get("injected_activity"))
+        patient_weight = get_patient_weight(row)
+        if patient_weight and injected_activity is None:
+            missing_activity_has_weight += 1
+        if injected_activity is not None and not patient_weight:
+            missing_weight_has_activity += 1
+        if dose_per_kg is not None:
+            dose_values.append(dose_per_kg)
+            if dose_per_kg < 0.1 or dose_per_kg > 50:
+                possible_unit_mismatch += 1
+    dose_mean = statistics.mean(dose_values) if dose_values else None
+    dose_std = statistics.stdev(dose_values) if len(dose_values) > 1 else None
+    dose_outliers = 0
+    if dose_mean is not None and dose_std:
+        for value in dose_values:
+            if abs(value - dose_mean) > 3 * dose_std:
+                dose_outliers += 1
+
+    scanner_groups = {}
+    for row in representative_series_rows:
+        key = (
+            row.get("manufacturer") or "Unknown",
+            row.get("manufacturer_model_name") or "Unknown",
+            row.get("software_version") or "Unknown",
+        )
+        entry = scanner_groups.setdefault(key, {"count": 0, "csa_hashes": set()})
+        entry["count"] += 1
+        if row.get("csa_series_header_hash"):
+            entry["csa_hashes"].add(row["csa_series_header_hash"])
+    scanner_landscape = [
+        {"manufacturer": key[0], "model": key[1], "software": key[2], "count": data["count"], "unique_csa": len(data["csa_hashes"])}
+        for key, data in scanner_groups.items()
+    ]
+    scanner_landscape.sort(key=lambda x: x["count"], reverse=True)
+
+    protocol_radiopharm = []
+    radiopharm_fps = {}
+    for row in representative_series_rows:
+        radiopharm = row.get("radiopharmaceutical") or "Unknown"
+        fp = row.get("csa_series_header_hash")
+        if not fp:
+            continue
+        entry = radiopharm_fps.setdefault(radiopharm, {})
+        entry[fp] = entry.get(fp, 0) + 1
+    for radiopharm, fp_counts in radiopharm_fps.items():
+        sorted_fps = sorted(fp_counts.items(), key=lambda x: x[1], reverse=True)
+        top_fp, top_count = sorted_fps[0]
+        protocol_radiopharm.append({"radiopharmaceutical": radiopharm, "unique_fps": len(fp_counts), "top_fp": top_fp, "top_count": top_count})
+    protocol_radiopharm.sort(key=lambda x: x["unique_fps"], reverse=True)
+
+    derived_counts = {"seg": 0, "rtstruct": 0, "highdicom": 0, "qiicr": 0}
+    for row in representative_series_rows:
+        modality = (row.get("modality") or "").upper()
+        manufacturer = (row.get("manufacturer") or "").lower()
+        if modality == "SEG":
+            derived_counts["seg"] += 1
+        if modality == "RTSTRUCT":
+            derived_counts["rtstruct"] += 1
+        if manufacturer == "highdicom":
+            derived_counts["highdicom"] += 1
+        if manufacturer == "qiicr":
+            derived_counts["qiicr"] += 1
+
+    ctp_label_counts = []
+    try:
+        representative_series_uids = [row.get("series_instance_uid") for row in representative_series_rows if row.get("series_instance_uid")]
+        if representative_series_uids:
+            conn = get_db_connection(db_path)
+            counts = {}
+            chunk_size = 900
+            for i in range(0, len(representative_series_uids), chunk_size):
+                chunk = representative_series_uids[i:i + chunk_size]
+                placeholders = ",".join(["?"] * len(chunk))
+                cursor = conn.execute(f"""
+                    SELECT value_text, COUNT(*) as count
+                    FROM private_tag
+                    WHERE creator = 'CTP'
+                      AND group_hex = '0013'
+                      AND element_hex = '1010'
+                      AND value_text IS NOT NULL
+                      AND value_text != ''
+                      AND series_instance_uid IN ({placeholders})
+                    GROUP BY value_text
+                """, chunk)
+                for row in cursor.fetchall():
+                    value_text = row["value_text"]
+                    counts[value_text] = counts.get(value_text, 0) + int(row["count"])
+            conn.close()
+            ctp_label_counts = [{"value_text": value_text, "count": count} for value_text, count in sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10]]
+    except sqlite3.Error:
+        ctp_label_counts = []
+
+    sop_counts = {}
+    for row in representative_series_rows:
+        sop_uid = row.get("sop_instance_uid")
+        if sop_uid:
+            sop_counts[sop_uid] = sop_counts.get(sop_uid, 0) + 1
+    duplicate_sop_count = sum(1 for count in sop_counts.values() if count > 1)
+
+    series_signature_counts = {}
+    for row in representative_series_rows:
+        signature = (
+            row.get("study_instance_uid"),
+            row.get("modality"),
+            row.get("series_description"),
+            row.get("acquisition_date"),
+            row.get("acquisition_time"),
+            row.get("number_of_slices"),
+        )
+        series_signature_counts[signature] = series_signature_counts.get(signature, 0) + 1
+    duplicate_series_signatures = sum(1 for count in series_signature_counts.values() if count > 1)
+
+    study_series_counts = {row.get("study_instance_uid"): 1 for row in representative_series_rows if row.get("study_instance_uid")}
+    studies_missing_ct = sum(1 for mods in study_modalities.values() if "PT" in mods and "CT" not in mods)
+    studies_missing_pt = sum(1 for mods in study_modalities.values() if "CT" in mods and "PT" not in mods)
+    studies_high_series = sum(1 for count in study_series_counts.values() if count > 20)
+
+    qa_scores = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for row in representative_series_rows:
+        score = 0
+        if parse_db_float(row.get("patient_weight")) is not None:
+            score += 1
+        if parse_db_float(row.get("injected_activity")) is not None:
+            score += 1
+        _, status = compute_delay_status(row)
+        if status in ("ok", "too_long"):
+            score += 1
+        if status == "ok" and not has_time_conflict(row):
+            score += 1
+        if majority_csa and row.get("csa_series_header_hash") == majority_csa:
+            score += 1
+        qa_scores[score] += 1
+
+    completeness_stats = {
+        "total": study_total,
+        "counts": completeness_counts,
+        "totals": {
+            "weight": study_total,
+            "dose": radiopharm_study_total,
+            "injection_time": radiopharm_study_total,
+            "acquisition_time": study_total,
+            "radiopharmaceutical": radiopharm_study_total,
+            "patient_sex": study_total,
+            "patient_age": study_total,
+        },
+    }
+    dose_stats = {
+        "outliers": dose_outliers,
+        "unit_mismatch": possible_unit_mismatch,
+        "missing_activity_has_weight": missing_activity_has_weight,
+        "missing_weight_has_activity": missing_weight_has_activity,
+        "total": radiopharm_dose_total,
+        "mean": dose_mean,
+        "std_dev": dose_std,
+    }
+    derived_stats = {
+        "seg": derived_counts["seg"],
+        "rtstruct": derived_counts["rtstruct"],
+        "highdicom": derived_counts["highdicom"],
+        "qiicr": derived_counts["qiicr"],
+        "ctp_labels": ctp_label_counts,
+    }
+    duplicate_stats = {"duplicate_sop": duplicate_sop_count, "duplicate_series_signatures": duplicate_series_signatures}
+    study_comp_stats = {"missing_ct": studies_missing_ct, "missing_pt": studies_missing_pt, "high_series": studies_high_series}
+
+    def create_histogram(data, bins=20, min_val=None, max_val=None, precision=1, bin_width=None, max_bins=60):
+        if not data:
+            return {'labels': [], 'values': []}
+        if min_val is None:
+            min_val = float(min(data))
+        if max_val is None:
+            max_val = float(max(data))
+        if max_val <= min_val:
+            max_val = min_val + 1
+        if bin_width:
+            bins = int(math.ceil((max_val - min_val) / bin_width))
+            bins = max(1, min(bins, max_bins))
+        bin_width = (max_val - min_val) / bins
+        histogram = [0] * bins
+        labels = [f"{min_val + i * bin_width:.{precision}f}" for i in range(bins)]
+        for value in data:
+            val = float(value)
+            if min_val <= val <= max_val:
+                bin_index = min(int((val - min_val) / bin_width), bins - 1)
+                histogram[bin_index] += 1
+        return {'labels': labels, 'values': histogram}
+
+    max_uptake = float(max(uptake_times)) if uptake_times else 180.0
+    uptake_histogram = create_histogram(uptake_times, min_val=0, max_val=max_uptake, precision=1, bin_width=5, max_bins=60)
+    max_dose = float(max(doses_per_kg)) if doses_per_kg else 10.0
+    dose_histogram = create_histogram(doses_per_kg, min_val=0, max_val=max_dose, precision=2, bin_width=0.1, max_bins=80)
+
+    return {
+        "stats": stats,
+        "uptake_histogram": {'labels': list(uptake_histogram['labels']), 'values': [int(v) for v in uptake_histogram['values']]},
+        "dose_histogram": {'labels': list(dose_histogram['labels']), 'values': [int(v) for v in dose_histogram['values']]},
+        "completeness_stats": completeness_stats,
+        "timing_stats": timing_counts,
+        "dose_stats": dose_stats,
+        "scanner_landscape": scanner_landscape,
+        "protocol_radiopharm": protocol_radiopharm,
+        "derived_stats": derived_stats,
+        "duplicate_stats": duplicate_stats,
+        "study_comp_stats": study_comp_stats,
+        "qa_scores": qa_scores,
+    }
+
+
 @app.route('/dashboard')
 def dashboard():
     """Analytics dashboard showing protocol adherence and distributions"""
-    # Handle language setting
     lang = request.args.get('lang')
     if lang and lang in ['en', 'de']:
         session['language'] = lang
-    
+
     db_name = normalize_db_name(request.args.get('db'))
     db_path = resolve_db_path(db_name)
     translations = get_translations()
     databanks = list_databanks()
-    
+
     if not os.path.exists(db_path):
         return f"Database not found: {db_path}", 404
-    
+
+    conn = None
     try:
         conn = get_db_connection(db_path)
-        
-        # Ideal values
-        IDEAL_UPTAKE_TIME_MINUTES = 60  # 60 minutes ideal uptake time
-        IDEAL_DOSE_PER_KG_MBQ = 3.0  # 3 MBq/kg ideal dose
-        
         cursor = conn.execute("""
             SELECT
                 study_instance_uid,
@@ -1904,692 +2530,34 @@ def dashboard():
             FROM dicom_metadata
             GROUP BY study_instance_uid
         """)
-        study_modalities_all = {
+        study_modalities = {
             row["study_instance_uid"]: set((row["modalities"] or "").split(","))
             for row in cursor.fetchall()
             if row["study_instance_uid"]
         }
-
-        representative_map, representative_series_rows = load_representative_series(conn)
+        _representative_map, representative_series_rows = load_representative_series(conn)
         conn.close()
-        study_series_counts = {row.get("study_instance_uid"): 1 for row in representative_series_rows if row.get("study_instance_uid")}
-        study_modalities = study_modalities_all
-        
-        # Process data and calculate metrics
-        uptake_times = []
-        doses_per_kg = []
-        activities_mbq = []
-        scan_durations = []
-        radiopharmaceuticals = {}
-        radiopharm_total_series = 0
-        manufacturers = {}
-        modality_stats = {}
-        radiopharm_stats = {}
-        ct_dose_by_modality = {}
-        for row_dict in representative_series_rows:
-            modality = row_dict.get('modality') or 'Unknown'
-            radiopharm = row_dict.get('radiopharmaceutical') or 'Unknown'
+        conn = None
 
-            modality_bucket = modality_stats.setdefault(modality, {
-                "count": 0,
-                "uptake_times": [],
-                "doses_per_kg": [],
-                "missing_weight": 0,
-                "missing_injection_time": 0,
-                "missing_acquisition_time": 0
-            })
-            radiopharm_bucket = None
-            if is_radiopharm_modality(modality):
-                radiopharm_bucket = radiopharm_stats.setdefault(radiopharm, {
-                    "count": 0,
-                    "uptake_times": [],
-                    "doses_per_kg": [],
-                    "missing_weight": 0,
-                    "missing_injection_time": 0,
-                    "missing_acquisition_time": 0
-                })
-                radiopharm_bucket["count"] += 1
-                radiopharm_total_series += 1
-            modality_bucket["count"] += 1
-            
-            # Calculate uptake time (injection to acquisition delay)
-            delay_minutes = None
-            if (row_dict.get('injection_date') or row_dict.get('study_date')) and \
-               row_dict.get('injection_time') and \
-               (row_dict.get('acquisition_date') or row_dict.get('study_date')) and \
-               row_dict.get('acquisition_time'):
-                
-                injection_date = row_dict.get('injection_date') or row_dict.get('study_date')
-                acquisition_date = row_dict.get('acquisition_date') or row_dict.get('study_date')
-                
-                delay_minutes, _ = calculate_injection_delay(
-                    injection_date,
-                    row_dict['injection_time'],
-                    acquisition_date,
-                    row_dict['acquisition_time'],
-                    injection_date_missing=(row_dict.get('injection_date') is None)
-                )
-                
-                if delay_minutes and delay_minutes > 0:
-                    uptake_times.append(delay_minutes)
-                    modality_bucket["uptake_times"].append(delay_minutes)
-                    if radiopharm_bucket is not None:
-                        radiopharm_bucket["uptake_times"].append(delay_minutes)
-            else:
-                modality_bucket["missing_injection_time"] += 1
-                if radiopharm_bucket is not None:
-                    radiopharm_bucket["missing_injection_time"] += 1
-            if not (row_dict.get('acquisition_time') and (row_dict.get('acquisition_date') or row_dict.get('study_date'))):
-                modality_bucket["missing_acquisition_time"] += 1
-                if radiopharm_bucket is not None:
-                    radiopharm_bucket["missing_acquisition_time"] += 1
-            
-            # Calculate dose per kg
-            patient_weight = get_patient_weight(row_dict)
-            injected_activity = parse_db_float(row_dict.get('injected_activity'))
-            dose_per_kg = None
-            activity_mbq = None
-            if patient_weight is not None and injected_activity is not None and patient_weight > 0:
-                # Convert to MBq if needed (check if > 1e6, then it's in Bq)
-                activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
-                dose_per_kg = activity_mbq / patient_weight
-                
-                if dose_per_kg > 0 and dose_per_kg < 100:  # Reasonable range
-                    doses_per_kg.append(dose_per_kg)
-                    activities_mbq.append(activity_mbq)
-                    modality_bucket["doses_per_kg"].append(dose_per_kg)
-                    if radiopharm_bucket is not None:
-                        radiopharm_bucket["doses_per_kg"].append(dose_per_kg)
-                else:
-                    dose_per_kg = None
-            else:
-                modality_bucket["missing_weight"] += 1
-                if radiopharm_bucket is not None:
-                    radiopharm_bucket["missing_weight"] += 1
-
-            # Scan duration proxy
-            series_time = row_dict.get('series_time')
-            acquisition_time = row_dict.get('acquisition_time')
-            if series_time and acquisition_time:
-                series_seconds = parse_time_to_seconds(series_time)
-                acquisition_seconds = parse_time_to_seconds(acquisition_time)
-                if series_seconds is not None and acquisition_seconds is not None:
-                    duration = (acquisition_seconds - series_seconds) / 60
-                    if 0 <= duration <= 480:
-                        scan_durations.append(duration)
-            
-            # Count radiopharmaceuticals
-            if is_radiopharm_modality(modality) and row_dict.get('radiopharmaceutical'):
-                rad = row_dict['radiopharmaceutical']
-                radiopharmaceuticals[rad] = radiopharmaceuticals.get(rad, 0) + 1
-            
-            # Count manufacturers
-            if row_dict.get('manufacturer'):
-                mfr = row_dict['manufacturer']
-                manufacturers[mfr] = manufacturers.get(mfr, 0) + 1
-
-            # CT dose metrics per modality
-            if row_dict.get('ctdivol') is not None or row_dict.get('dlp') is not None:
-                ct_bucket = ct_dose_by_modality.setdefault(modality, {
-                    "ctdivol": [],
-                    "dlp": [],
-                    "count": 0
-                })
-                if row_dict.get('ctdivol') is not None:
-                    ct_bucket["ctdivol"].append(row_dict["ctdivol"])
-                if row_dict.get('dlp') is not None:
-                    ct_bucket["dlp"].append(row_dict["dlp"])
-                ct_bucket["count"] += 1
-
-
-        
-        # Calculate statistics
-        
-        # Helper function to safely convert to float or None
-        def safe_float(value):
-            return float(value) if value is not None else None
-        
-        def safe_stats(values):
-            if not values:
-                return {
-                    "count": 0,
-                    "mean": None,
-                    "median": None,
-                    "std_dev": None,
-                    "min": None,
-                    "max": None,
-                }
-            return {
-                "count": len(values),
-                "mean": safe_float(statistics.mean(values)) if values else None,
-                "median": safe_float(statistics.median(values)) if values else None,
-                "std_dev": safe_float(statistics.stdev(values)) if len(values) > 1 else None,
-                "min": safe_float(min(values)) if values else None,
-                "max": safe_float(max(values)) if values else None,
-            }
-
-        total_series = len(representative_series_rows)
-        total_studies = len(study_summary)
-
-        redo_total = len(representative_series_rows)
-        redo_with_repeats = 0
-
-        def parse_age_years(value: Optional[object]) -> Optional[int]:
-            if not value:
-                return None
-            text = str(value).strip()
-            if not text:
-                return None
-            digits = "".join([c for c in text if c.isdigit()])
-            if not digits:
-                return None
-            try:
-                return int(digits)
-            except ValueError:
-                return None
-
-        age_buckets = {
-            "0-17": 0,
-            "18-39": 0,
-            "40-59": 0,
-            "60-79": 0,
-            "80+": 0
-        }
-        sex_counts = {}
-        missing_weight = 0
-        missing_height = 0
-        missing_birth_date = 0
-        ctp_flagged = 0
-        study_dates = {}
-        study_hours = {}
-        for study in study_summary:
-            sex = study.get("patient_sex") or "Unknown"
-            sex_counts[sex] = sex_counts.get(sex, 0) + 1
-            age_years = parse_age_years(study.get("patient_age"))
-            if age_years is not None:
-                if age_years <= 17:
-                    age_buckets["0-17"] += 1
-                elif age_years <= 39:
-                    age_buckets["18-39"] += 1
-                elif age_years <= 59:
-                    age_buckets["40-59"] += 1
-                elif age_years <= 79:
-                    age_buckets["60-79"] += 1
-                else:
-                    age_buckets["80+"] += 1
-            if parse_db_float(study.get("patient_weight")) is None:
-                missing_weight += 1
-            if parse_db_float(study.get("patient_size")) is None:
-                missing_height += 1
-            if not study.get("patient_birth_date"):
-                missing_birth_date += 1
-            if study.get("ctp_collection") or study.get("ctp_subject_id") or study.get("ctp_private_flag_raw") or study.get("ctp_private_flag_int") is not None:
-                ctp_flagged += 1
-            if study.get("study_date"):
-                study_dates[study["study_date"]] = study_dates.get(study["study_date"], 0) + 1
-            if study.get("study_time"):
-                time_parsed = parse_time_to_24hour(study["study_time"])
-                if time_parsed:
-                    study_hours[time_parsed[0]] = study_hours.get(time_parsed[0], 0) + 1
-
-        def summarize_group(group_data):
-            results = {}
-            for key, data in group_data.items():
-                uptake = safe_stats(data["uptake_times"])
-                dose = safe_stats(data["doses_per_kg"])
-                results[key] = {
-                    "count": data["count"],
-                    "uptake_mean": uptake["mean"],
-                    "uptake_median": uptake["median"],
-                    "uptake_within": len([t for t in data["uptake_times"] if 45 <= t <= 75]),
-                    "dose_mean": dose["mean"],
-                    "dose_median": dose["median"],
-                    "dose_within": len([d for d in data["doses_per_kg"] if 2.5 <= d <= 3.5]),
-                    "missing_weight": data["missing_weight"],
-                    "missing_injection_time": data["missing_injection_time"],
-                    "missing_acquisition_time": data["missing_acquisition_time"],
-                }
-            return results
-
-        modality_summary = summarize_group(modality_stats)
-        radiopharm_summary = summarize_group(radiopharm_stats)
-        missing_series_weight = sum(group["missing_weight"] for group in modality_stats.values())
-        missing_series_injection = sum(group["missing_injection_time"] for group in modality_stats.values())
-        missing_series_acquisition = sum(group["missing_acquisition_time"] for group in modality_stats.values())
-
-        ct_summary = {}
-        for modality, values in ct_dose_by_modality.items():
-            ctdivol_stats = safe_stats(values["ctdivol"])
-            dlp_stats = safe_stats(values["dlp"])
-            ct_summary[modality] = {
-                "count": values["count"],
-                "ctdivol_mean": ctdivol_stats["mean"],
-                "ctdivol_median": ctdivol_stats["median"],
-                "dlp_mean": dlp_stats["mean"],
-                "dlp_median": dlp_stats["median"],
-            }
-
-        stats = {
-            'total_series': total_series,
-            'total_studies': total_studies,
-            'uptake_time': {
-                'count': len(uptake_times),
-                'mean': safe_float(statistics.mean(uptake_times)) if uptake_times else None,
-                'median': safe_float(statistics.median(uptake_times)) if uptake_times else None,
-                'std_dev': safe_float(statistics.stdev(uptake_times)) if len(uptake_times) > 1 else None,
-                'min': safe_float(min(uptake_times)) if uptake_times else None,
-                'max': safe_float(max(uptake_times)) if uptake_times else None,
-                'ideal': IDEAL_UPTAKE_TIME_MINUTES,
-                'within_ideal_range': len([t for t in uptake_times if 45 <= t <= 75]) if uptake_times else 0
-            },
-            'dose_per_kg': {
-                'count': len(doses_per_kg),
-                'mean': safe_float(statistics.mean(doses_per_kg)) if doses_per_kg else None,
-                'median': safe_float(statistics.median(doses_per_kg)) if doses_per_kg else None,
-                'std_dev': safe_float(statistics.stdev(doses_per_kg)) if len(doses_per_kg) > 1 else None,
-                'min': safe_float(min(doses_per_kg)) if doses_per_kg else None,
-                'max': safe_float(max(doses_per_kg)) if doses_per_kg else None,
-                'ideal': IDEAL_DOSE_PER_KG_MBQ,
-                'within_ideal_range': len([d for d in doses_per_kg if 2.5 <= d <= 3.5]) if doses_per_kg else 0
-            },
-            'radiopharmaceuticals': dict(sorted(radiopharmaceuticals.items(), key=lambda x: x[1], reverse=True)[:10]),
-            'radiopharmaceutical_total_series': radiopharm_total_series,
-            'manufacturers': dict(sorted(manufacturers.items(), key=lambda x: x[1], reverse=True)[:10]),
-            'scan_duration': safe_stats(scan_durations),
-            'redo_rate': {
-                "total": redo_total,
-                "repeats": redo_with_repeats
-            },
-            'missingness': {
-                "weight": missing_weight,
-                "height": missing_height,
-                "birth_date": missing_birth_date,
-                "series_weight": missing_series_weight,
-                "series_injection_time": missing_series_injection,
-                "series_acquisition_time": missing_series_acquisition
-            },
-            'ctp_flagged': ctp_flagged,
-            'sex_counts': sex_counts,
-            'age_buckets': age_buckets,
-            'study_dates': dict(sorted(study_dates.items(), reverse=True)[:10]),
-            'study_hours': dict(sorted(study_hours.items())),
-            'modality_summary': dict(sorted(modality_summary.items(), key=lambda x: x[1]["count"], reverse=True)),
-            'radiopharm_summary': dict(sorted(radiopharm_summary.items(), key=lambda x: x[1]["count"], reverse=True)),
-            'ct_summary': dict(sorted(ct_summary.items(), key=lambda x: x[1]["count"], reverse=True))
-        }
-
-        # Track CSA series hash for QA scoring (used in index filter)
-        csa_series_counts = {}
-        for row in representative_series_rows:
-            csa_series = row.get("csa_series_header_hash")
-            if csa_series:
-                csa_series_counts[csa_series] = csa_series_counts.get(csa_series, 0) + 1
-        majority_csa = max(csa_series_counts, key=csa_series_counts.get) if csa_series_counts else None
-
-        # QA: Metadata completeness (study-level, representative studies only)
-        representative_study_uids = {
-            row.get("study_instance_uid")
-            for row in representative_series_rows
-            if row.get("study_instance_uid")
-        }
-        study_total = len(representative_study_uids)
-        completeness_counts = {
-            "weight": 0,
-            "dose": 0,
-            "injection_time": 0,
-            "acquisition_time": 0,
-            "radiopharmaceutical": 0,
-            "patient_sex": 0,
-            "patient_age": 0
-        }
-        radiopharm_study_total = 0
-        summary_by_uid = {study["study_instance_uid"]: study for study in study_summary if study.get("study_instance_uid")}
-        study_flags = {}
-        for study_uid in representative_study_uids:
-            study = summary_by_uid.get(study_uid, {})
-            study_flags[study_uid] = {
-                "weight": parse_db_float(study.get("patient_weight")) is not None,
-                "patient_sex": bool(study.get("patient_sex")),
-                "patient_age": bool(study.get("patient_age") or study.get("patient_birth_date")),
-                "dose": False,
-                "injection_time": False,
-                "acquisition_time": False,
-                "radiopharmaceutical": False
-            }
-            modalities = study_modalities.get(study_uid, set())
-            if any(is_radiopharm_modality(m or "") for m in modalities):
-                radiopharm_study_total += 1
-
-        for row in representative_series_rows:
-            study_uid = row.get("study_instance_uid")
-            if not study_uid or study_uid not in study_flags:
-                continue
-            modality = row.get("modality") or ""
-            if is_radiopharm_modality(modality):
-                if parse_db_float(row.get("injected_activity")) is not None:
-                    study_flags[study_uid]["dose"] = True
-                if row.get("injection_time"):
-                    study_flags[study_uid]["injection_time"] = True
-            if row.get("acquisition_time"):
-                study_flags[study_uid]["acquisition_time"] = True
-            if is_radiopharm_modality(modality) and has_radiopharm(row):
-                study_flags[study_uid]["radiopharmaceutical"] = True
-
-        for flags in study_flags.values():
-            for key in completeness_counts:
-                if flags.get(key):
-                    completeness_counts[key] += 1
-
-        # QA: Timing integrity
-        timing_counts = {
-            "negative": 0,
-            "too_long": 0,
-            "parse_fail": 0,
-            "missing": 0,
-            "study_time_conflict": 0
-        }
-        for row in representative_series_rows:
-            _, status = compute_delay_status(row)
-            if status in timing_counts:
-                timing_counts[status] += 1
-            if has_time_conflict(row):
-                timing_counts["study_time_conflict"] += 1
-
-        # QA: Dose plausibility
-        dose_values = []
-        missing_activity_has_weight = 0
-        missing_weight_has_activity = 0
-        possible_unit_mismatch = 0
-        radiopharm_dose_total = 0
-        for row in representative_series_rows:
-            modality = row.get("modality") or ""
-            if not is_radiopharm_modality(modality):
-                continue
-            radiopharm_dose_total += 1
-            dose_per_kg, activity_mbq = compute_dose_from_row(row)
-            injected_activity = parse_db_float(row.get("injected_activity"))
-            patient_weight = get_patient_weight(row)
-            if patient_weight and injected_activity is None:
-                missing_activity_has_weight += 1
-            if injected_activity is not None and not patient_weight:
-                missing_weight_has_activity += 1
-            if dose_per_kg is not None:
-                dose_values.append(dose_per_kg)
-                if dose_per_kg < 0.1 or dose_per_kg > 50:
-                    possible_unit_mismatch += 1
-        dose_mean = statistics.mean(dose_values) if dose_values else None
-        dose_std = statistics.stdev(dose_values) if len(dose_values) > 1 else None
-        dose_outliers = 0
-        if dose_mean is not None and dose_std:
-            for value in dose_values:
-                if abs(value - dose_mean) > 3 * dose_std:
-                    dose_outliers += 1
-
-        # QA: Scanner landscape
-        scanner_groups = {}
-        for row in representative_series_rows:
-            key = (
-                row.get("manufacturer") or "Unknown",
-                row.get("manufacturer_model_name") or "Unknown",
-                row.get("software_version") or "Unknown"
-            )
-            entry = scanner_groups.setdefault(key, {
-                "count": 0,
-                "csa_hashes": set()
-            })
-            entry["count"] += 1
-            if row.get("csa_series_header_hash"):
-                entry["csa_hashes"].add(row["csa_series_header_hash"])
-        scanner_landscape = [
-            {
-                "manufacturer": key[0],
-                "model": key[1],
-                "software": key[2],
-                "count": data["count"],
-                "unique_csa": len(data["csa_hashes"])
-            }
-            for key, data in scanner_groups.items()
-        ]
-        scanner_landscape.sort(key=lambda x: x["count"], reverse=True)
-
-        # QA: Protocol fingerprint vs radiopharmaceutical
-        protocol_radiopharm = []
-        radiopharm_fps = {}
-        for row in representative_series_rows:
-            radiopharm = row.get("radiopharmaceutical") or "Unknown"
-            fp = row.get("csa_series_header_hash")
-            if not fp:
-                continue
-            entry = radiopharm_fps.setdefault(radiopharm, {})
-            entry[fp] = entry.get(fp, 0) + 1
-        for radiopharm, fp_counts in radiopharm_fps.items():
-            sorted_fps = sorted(fp_counts.items(), key=lambda x: x[1], reverse=True)
-            top_fp, top_count = sorted_fps[0]
-            protocol_radiopharm.append({
-                "radiopharmaceutical": radiopharm,
-                "unique_fps": len(fp_counts),
-                "top_fp": top_fp,
-                "top_count": top_count
-            })
-        protocol_radiopharm.sort(key=lambda x: x["unique_fps"], reverse=True)
-
-        # QA: Derived object provenance
-        derived_counts = {
-            "seg": 0,
-            "rtstruct": 0,
-            "highdicom": 0,
-            "qiicr": 0
-        }
-        for row in representative_series_rows:
-            modality = (row.get("modality") or "").upper()
-            manufacturer = (row.get("manufacturer") or "").lower()
-            if modality == "SEG":
-                derived_counts["seg"] += 1
-            if modality == "RTSTRUCT":
-                derived_counts["rtstruct"] += 1
-            if manufacturer == "highdicom":
-                derived_counts["highdicom"] += 1
-            if manufacturer == "qiicr":
-                derived_counts["qiicr"] += 1
-
-        ctp_label_counts = []
-        try:
-            representative_series_uids = [
-                row.get("series_instance_uid")
-                for row in representative_series_rows
-                if row.get("series_instance_uid")
-            ]
-            if representative_series_uids:
-                conn = get_db_connection(db_path)
-                counts = {}
-                chunk_size = 900
-                for i in range(0, len(representative_series_uids), chunk_size):
-                    chunk = representative_series_uids[i:i + chunk_size]
-                    placeholders = ",".join(["?"] * len(chunk))
-                    cursor = conn.execute(f"""
-                        SELECT value_text, COUNT(*) as count
-                        FROM private_tag
-                        WHERE creator = 'CTP'
-                          AND group_hex = '0013'
-                          AND element_hex = '1010'
-                          AND value_text IS NOT NULL
-                          AND value_text != ''
-                          AND series_instance_uid IN ({placeholders})
-                        GROUP BY value_text
-                    """, chunk)
-                    for row in cursor.fetchall():
-                        value_text = row["value_text"]
-                        counts[value_text] = counts.get(value_text, 0) + int(row["count"])
-                conn.close()
-                ctp_label_counts = [
-                    {"value_text": value_text, "count": count}
-                    for value_text, count in sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10]
-                ]
-        except Exception:
-            ctp_label_counts = []
-
-        # QA: Duplicate detection (representative series only)
-        sop_counts = {}
-        for row in representative_series_rows:
-            sop_uid = row.get("sop_instance_uid")
-            if sop_uid:
-                sop_counts[sop_uid] = sop_counts.get(sop_uid, 0) + 1
-        duplicate_sop_count = sum(1 for count in sop_counts.values() if count > 1)
-
-        series_signature_counts = {}
-        for row in representative_series_rows:
-            signature = (
-                row.get("study_instance_uid"),
-                row.get("modality"),
-                row.get("series_description"),
-                row.get("acquisition_date"),
-                row.get("acquisition_time"),
-                row.get("number_of_slices")
-            )
-            series_signature_counts[signature] = series_signature_counts.get(signature, 0) + 1
-        duplicate_series_signatures = sum(1 for count in series_signature_counts.values() if count > 1)
-
-        # QA: Study composition
-        studies_missing_ct = sum(1 for mods in study_modalities.values() if "PT" in mods and "CT" not in mods)
-        studies_missing_pt = sum(1 for mods in study_modalities.values() if "CT" in mods and "PT" not in mods)
-        studies_high_series = sum(1 for count in study_series_counts.values() if count > 20)
-
-        # QA: Score distribution
-        qa_scores = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-        for row in representative_series_rows:
-            score = 0
-            if parse_db_float(row.get("patient_weight")) is not None:
-                score += 1
-            if parse_db_float(row.get("injected_activity")) is not None:
-                score += 1
-            _, status = compute_delay_status(row)
-            if status in ("ok", "too_long"):
-                score += 1
-            if status == "ok" and not has_time_conflict(row):
-                score += 1
-            if majority_csa and row.get("csa_series_header_hash") == majority_csa:
-                score += 1
-            qa_scores[score] += 1
-
-        completeness_stats = {
-            "total": study_total,
-            "counts": completeness_counts,
-            "totals": {
-                "weight": study_total,
-                "dose": radiopharm_study_total,
-                "injection_time": radiopharm_study_total,
-                "acquisition_time": study_total,
-                "radiopharmaceutical": radiopharm_study_total,
-                "patient_sex": study_total,
-                "patient_age": study_total
-            }
-        }
-        timing_stats = timing_counts
-        dose_stats = {
-            "outliers": dose_outliers,
-            "unit_mismatch": possible_unit_mismatch,
-            "missing_activity_has_weight": missing_activity_has_weight,
-            "missing_weight_has_activity": missing_weight_has_activity,
-            "total": radiopharm_dose_total,
-            "mean": dose_mean,
-            "std_dev": dose_std
-        }
-        derived_stats = {
-            "seg": derived_counts["seg"],
-            "rtstruct": derived_counts["rtstruct"],
-            "highdicom": derived_counts["highdicom"],
-            "qiicr": derived_counts["qiicr"],
-            "ctp_labels": ctp_label_counts
-        }
-        duplicate_stats = {
-            "duplicate_sop": duplicate_sop_count,
-            "duplicate_series_signatures": duplicate_series_signatures
-        }
-        study_comp_stats = {
-            "missing_ct": studies_missing_ct,
-            "missing_pt": studies_missing_pt,
-            "high_series": studies_high_series
-        }
-        
-        # Create histogram data for charts
-        def create_histogram(data, bins=20, min_val=None, max_val=None, precision=1, bin_width=None, max_bins=60):
-            if not data:
-                return {'labels': [], 'values': []}
-            
-            if min_val is None:
-                min_val = float(min(data))
-            if max_val is None:
-                max_val = float(max(data))
-            
-            # Ensure we have valid range
-            if max_val <= min_val:
-                max_val = min_val + 1
-
-            if bin_width:
-                bins = int(math.ceil((max_val - min_val) / bin_width))
-                bins = max(1, min(bins, max_bins))
-            bin_width = (max_val - min_val) / bins
-            histogram = [0] * bins
-            labels = []
-            
-            for i in range(bins):
-                labels.append(f"{min_val + i * bin_width:.{precision}f}")
-            
-            for value in data:
-                val = float(value)
-                if min_val <= val <= max_val:
-                    bin_index = min(int((val - min_val) / bin_width), bins - 1)
-                    histogram[bin_index] += 1
-            
-            return {'labels': labels, 'values': histogram}
-        
-        max_uptake = float(max(uptake_times)) if uptake_times else 180.0
-        uptake_histogram = create_histogram(
-            uptake_times,
-            min_val=0,
-            max_val=max_uptake,
-            precision=1,
-            bin_width=5,
-            max_bins=60
+        payload = _build_dashboard_payload(
+            study_summary=study_summary,
+            study_modalities=study_modalities,
+            representative_series_rows=representative_series_rows,
+            db_path=db_path,
         )
-        max_dose = float(max(doses_per_kg)) if doses_per_kg else 10.0
-        dose_histogram = create_histogram(
-            doses_per_kg,
-            min_val=0,
-            max_val=max_dose,
-            precision=2,
-            bin_width=0.1,
-            max_bins=80
+        return render_template(
+            'dashboard.html',
+            db_name=db_name,
+            databanks=databanks,
+            t=translations,
+            lang=get_language(),
+            **payload,
         )
-        
-        # Ensure all histogram data is JSON serializable (convert to lists explicitly)
-        uptake_histogram_clean = {
-            'labels': list(uptake_histogram['labels']),
-            'values': [int(v) for v in uptake_histogram['values']]
-        }
-        dose_histogram_clean = {
-            'labels': list(dose_histogram['labels']),
-            'values': [int(v) for v in dose_histogram['values']]
-        }
-        return render_template('dashboard.html', 
-                             stats=stats,
-                             uptake_histogram=uptake_histogram_clean,
-                             dose_histogram=dose_histogram_clean,
-                             completeness_stats=completeness_stats,
-                             timing_stats=timing_stats,
-                             dose_stats=dose_stats,
-                             scanner_landscape=scanner_landscape,
-                             protocol_radiopharm=protocol_radiopharm,
-                             derived_stats=derived_stats,
-                             duplicate_stats=duplicate_stats,
-                             study_comp_stats=study_comp_stats,
-                             qa_scores=qa_scores,
-                             db_name=db_name,
-                             databanks=databanks,
-                             t=translations,
-                             lang=get_language())
-    except Exception as e:
+    except (sqlite3.Error, ValueError, TypeError) as e:
         return f"Error: {str(e)}", 500
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.route('/api/series/<series_uid>')
@@ -2597,10 +2565,10 @@ def series_detail(series_uid):
     """API endpoint to get detailed series information"""
     db_name = normalize_db_name(request.args.get('db'))
     db_path = resolve_db_path(db_name)
-    
+
     if not os.path.exists(db_path):
         return jsonify({"error": "Database not found"}), 404
-    
+
     try:
         conn = get_db_connection(db_path)
         cursor = conn.execute("""
@@ -2609,10 +2577,10 @@ def series_detail(series_uid):
         """, (series_uid,))
         row = cursor.fetchone()
         conn.close()
-        
+
         if not row:
             return jsonify({"error": "Series not found"}), 404
-        
+
         return jsonify(dict(row))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2628,7 +2596,7 @@ def format_date(date_str):
         month = date_str[4:6]
         day = date_str[6:8]
         return f"{day}/{month}/{year}"
-    except:
+    except (TypeError, ValueError, IndexError):
         return date_str
 
 
@@ -2639,13 +2607,13 @@ def format_time(time_str):
     try:
         # Handle string or numeric input
         time_str = str(time_str).strip()
-        
+
         # DICOM TM format: HHMMSS[.frac] - at least 6 digits
         if len(time_str) >= 6:
             hours = time_str[:2]
             minutes = time_str[2:4]
             seconds = time_str[4:6]
-            
+
             # Handle fractional seconds if present
             if '.' in time_str and len(time_str) > 6:
                 # Extract fractional part but don't display (optional)
@@ -2653,7 +2621,7 @@ def format_time(time_str):
                 if frac_part:
                     # Show seconds with 1 decimal place if fractional part exists
                     return f"{hours}:{minutes}:{seconds}.{frac_part[:1]}"
-            
+
             return f"{hours}:{minutes}:{seconds}"
         return time_str
     except Exception:
@@ -2723,23 +2691,23 @@ def parse_pet_dose_report(xml_text: str) -> Optional[List[dict]]:
 
 def parse_time_to_24hour(time_str):
     """Parse time string and convert to 24-hour format, handling 12-hour format errors
-    
+
     Returns: (hour, minute, second) tuple in 24-hour format, or None if parsing fails
     """
     if not time_str:
         return None
     try:
         time_str = str(time_str).strip()
-        
+
         # Remove fractional seconds for parsing
         if '.' in time_str:
             time_str = time_str.split('.')[0]
-        
+
         if len(time_str) >= 6:
             hours = int(time_str[:2])
             minutes = int(time_str[2:4])
             seconds = int(time_str[4:6]) if len(time_str) >= 6 else 0
-            
+
             return (hours, minutes, seconds)
     except Exception:
         return None
@@ -2757,13 +2725,13 @@ def parse_time_to_seconds(time_str):
             minutes = int(time_str[2:4])
             seconds = int(time_str[4:6])
             total_seconds = hours * 3600 + minutes * 60 + seconds
-            
+
             # Add fractional part if present (DICOM fractions are decimal, not whole seconds)
             if '.' in time_str:
                 frac_str = time_str.split('.', 1)[1]
                 if frac_str:
                     total_seconds += float("0." + frac_str)
-            
+
             return total_seconds
     except Exception:
         return None
@@ -2785,7 +2753,7 @@ def parse_date_to_days(date_str):
 
 def calculate_injection_delay(injection_date, injection_time, acquisition_date, acquisition_time, injection_date_missing=False, study_time=None):
     """Calculate delay between injection and acquisition in minutes.
-    
+
     This version ships raw DICOM times without applying any time correction heuristics.
     """
     if not injection_date or not injection_time or not acquisition_date or not acquisition_time:
@@ -2833,16 +2801,16 @@ def calculate_patient_age(birth_date, study_date):
     """Calculate patient age in years from birth date and study date"""
     if not birth_date or not study_date:
         return None
-    
+
     try:
-        
+
         birth_str = str(birth_date).strip()
         study_str = str(study_date).strip()
-        
+
         if len(birth_str) >= 8 and len(study_str) >= 8:
             birth_dt = datetime(int(birth_str[:4]), int(birth_str[4:6]), int(birth_str[6:8]))
             study_dt = datetime(int(study_str[:4]), int(study_str[4:6]), int(study_str[6:8]))
-            
+
             age = (study_dt - birth_dt).days / 365.25
             return age
     except Exception:
@@ -2853,7 +2821,7 @@ def calculate_activity_at_scan(injected_activity, half_life_seconds, delay_minut
     """Calculate remaining activity at time of scan (with decay)"""
     if not injected_activity or not half_life_seconds or not delay_minutes or half_life_seconds <= 0:
         return None
-    
+
     try:
         # Activity = A0 * e^(-lambda * t)
         # where lambda = ln(2) / half_life
@@ -2869,7 +2837,7 @@ def format_delay(minutes):
     """Format delay in minutes to human-readable format"""
     if minutes is None:
         return None
-    
+
     try:
         if minutes < 60:
             return f"{minutes:.1f} minutes"

@@ -7,20 +7,24 @@ Extracts all important medical and manufacturer metadata from DICOM files.
 import argparse
 import hashlib
 import json
+import struct
 import sys
 import time
-import struct
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pydicom  # type: ignore[import]
+from pydicom.errors import InvalidDicomError
+
+from dicom_discovery import collect_dicom_files, is_metadata_artifact
+
 
 @dataclass
 class DICOMMetadata:
     """Container for all extracted DICOM metadata"""
-    
+
     # Patient Information
     patient_id: Optional[str] = None
     patient_name: Optional[str] = None
@@ -29,7 +33,7 @@ class DICOMMetadata:
     patient_age: Optional[str] = None
     patient_weight: Optional[float] = None
     patient_size: Optional[float] = None  # Height in meters (0010,1020)
-    
+
     # Study Information
     study_instance_uid: Optional[str] = None
     study_date: Optional[str] = None
@@ -38,7 +42,7 @@ class DICOMMetadata:
     study_id: Optional[str] = None
     accession_number: Optional[str] = None
     referring_physician_name: Optional[str] = None
-    
+
     # Series Information
     series_instance_uid: Optional[str] = None
     series_number: Optional[int] = None
@@ -48,7 +52,7 @@ class DICOMMetadata:
     protocol_name: Optional[str] = None
     modality: Optional[str] = None
     body_part_examined: Optional[str] = None
-    
+
     # Manufacturer Information
     manufacturer: Optional[str] = None
     manufacturer_model_name: Optional[str] = None
@@ -57,7 +61,7 @@ class DICOMMetadata:
     device_serial_number: Optional[str] = None
     institution_name: Optional[str] = None
     institution_address: Optional[str] = None
-    
+
     # Acquisition Information
     acquisition_date: Optional[str] = None
     acquisition_time: Optional[str] = None
@@ -78,7 +82,7 @@ class DICOMMetadata:
     exposure_time: Optional[float] = None
     exposure: Optional[float] = None
     tube_current: Optional[float] = None
-    
+
     # Nuclear Medicine Specific
     radiopharmaceutical: Optional[str] = None
     injected_activity: Optional[float] = None
@@ -87,11 +91,11 @@ class DICOMMetadata:
     injection_date: Optional[str] = None
     half_life: Optional[float] = None
     decay_correction: Optional[str] = None
-    
+
     # Additional Radiopharmaceutical Information
     radiopharmaceutical_volume: Optional[float] = None  # (0018,1071)
     radionuclide_total_dose: Optional[float] = None  # (0018,1074)
-    
+
     # Image Information
     image_type: Optional[str] = None
     pixel_spacing: Optional[str] = None
@@ -119,8 +123,7 @@ class DICOMMetadata:
 
     # Private tag payloads (stored separately)
     private_tags: List[Dict[str, Any]] = field(default_factory=list)
-    
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return asdict(self)
@@ -132,26 +135,26 @@ def safe_getattr(obj, attr: str, cast_type=None):
         value = getattr(obj, attr, None)
         if value is None:
             return None
-        
+
         # Convert PersonName and other DICOM types to string
         if hasattr(value, '__str__'):
             value = str(value)
-        
+
         # Strip whitespace from strings
         if isinstance(value, str):
             value = value.strip()
             if not value or value == '':
                 return None
-        
+
         # Cast to requested type
         if cast_type and value is not None:
             try:
                 return cast_type(value)
             except (ValueError, TypeError):
                 return None
-        
+
         return value
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
         return None
 
 
@@ -171,7 +174,7 @@ def _is_printable_ascii(raw: bytes, min_ratio: float = 0.90) -> bool:
 def _parse_numeric(text: str) -> Optional[float]:
     try:
         return float(text)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -353,11 +356,11 @@ def parse_csa_header(raw: bytes) -> Optional[Dict[str, Any]]:
         offset += 4
         vr = _read_csa_string(data, offset, 4)
         offset += 4
-        _syngo_dt = _read_uint32(data, offset)
+        _read_uint32(data, offset)
         offset += 4
         nitems = _read_uint32(data, offset)
         offset += 4
-        _unknown = _read_uint32(data, offset)
+        _read_uint32(data, offset)
         offset += 4
 
         if nitems is None or nitems < 0:
@@ -369,7 +372,7 @@ def parse_csa_header(raw: bytes) -> Optional[Dict[str, Any]]:
                 break
             item_length = _read_uint32(data, offset)
             offset += 4
-            _item_delim = _read_uint32(data, offset)
+            _read_uint32(data, offset)
             offset += 4
             if item_length is None or item_length < 0:
                 break
@@ -423,15 +426,15 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     # Skip macOS metadata files
     if dcm_path.name.startswith('._') or '__MACOSX' in str(dcm_path):
         return None
-    
+
     try:
         ds = pydicom.dcmread(dcm_path, stop_before_pixels=True, force=False)
-    except Exception as e:
+    except (InvalidDicomError, OSError, ValueError):
         # Silently skip files that can't be read (macOS metadata, invalid DICOM, etc.)
         return None
-    
+
     meta = DICOMMetadata()
-    
+
     # Patient Information
     meta.patient_id = safe_getattr(ds, 'PatientID')
     meta.patient_name = safe_getattr(ds, 'PatientName')
@@ -440,7 +443,7 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     meta.patient_age = safe_getattr(ds, 'PatientAge')
     meta.patient_weight = safe_getattr(ds, 'PatientWeight', float)
     meta.patient_size = safe_getattr(ds, 'PatientSize', float)  # Height in meters
-    
+
     # Study Information
     meta.study_instance_uid = safe_getattr(ds, 'StudyInstanceUID')
     meta.study_date = safe_getattr(ds, 'StudyDate')
@@ -449,7 +452,7 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     meta.study_id = safe_getattr(ds, 'StudyID')
     meta.accession_number = safe_getattr(ds, 'AccessionNumber')
     meta.referring_physician_name = safe_getattr(ds, 'ReferringPhysicianName')
-    
+
     # Series Information
     meta.series_instance_uid = safe_getattr(ds, 'SeriesInstanceUID')
     meta.series_number = safe_getattr(ds, 'SeriesNumber', int)
@@ -459,7 +462,7 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     meta.protocol_name = safe_getattr(ds, 'ProtocolName')
     meta.modality = safe_getattr(ds, 'Modality')
     meta.body_part_examined = safe_getattr(ds, 'BodyPartExamined')
-    
+
     # Manufacturer Information
     meta.manufacturer = safe_getattr(ds, 'Manufacturer')
     meta.manufacturer_model_name = safe_getattr(ds, 'ManufacturerModelName')
@@ -468,7 +471,7 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     meta.device_serial_number = safe_getattr(ds, 'DeviceSerialNumber')
     meta.institution_name = safe_getattr(ds, 'InstitutionName')
     meta.institution_address = safe_getattr(ds, 'InstitutionAddress')
-    
+
     # Acquisition Information
     meta.acquisition_date = safe_getattr(ds, 'AcquisitionDate')
     meta.acquisition_time = safe_getattr(ds, 'AcquisitionTime')
@@ -489,7 +492,7 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     meta.exposure_time = safe_getattr(ds, 'ExposureTime', float)
     meta.exposure = safe_getattr(ds, 'Exposure', float)
     meta.tube_current = safe_getattr(ds, 'TubeCurrent', float)
-    
+
     # Nuclear Medicine Specific
     if 'RadiopharmaceuticalInformationSequence' in ds:
         try:
@@ -503,24 +506,24 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
                 # Additional radiopharmaceutical fields from sequence
                 meta.radiopharmaceutical_volume = safe_getattr(item, 'RadiopharmaceuticalVolume', float)
                 meta.radionuclide_total_dose = safe_getattr(item, 'RadionuclideTotalDose', float)
-        except Exception:
+        except (AttributeError, KeyError, TypeError, ValueError):
             pass
-    
+
     # Fallback to direct tag access if sequence not available
     meta.radiopharmaceutical = meta.radiopharmaceutical or safe_getattr(ds, 'Radiopharmaceutical')
     meta.injection_time = meta.injection_time or safe_getattr(ds, 'InjectionTime')
     meta.injection_date = safe_getattr(ds, 'InjectionDate')
     meta.half_life = meta.half_life or safe_getattr(ds, 'HalfLife', float)
     meta.decay_correction = safe_getattr(ds, 'DecayCorrection')
-    
+
     # Extract additional radiopharmaceutical tags directly (0018,1071, 0018,1074)
     meta.radiopharmaceutical_volume = meta.radiopharmaceutical_volume or safe_getattr(ds, 'RadiopharmaceuticalVolume', float)
     meta.radionuclide_total_dose = meta.radionuclide_total_dose or safe_getattr(ds, 'RadionuclideTotalDose', float)
-    
+
     # Use radionuclide_total_dose as injected_activity if not already set
     if not meta.injected_activity and meta.radionuclide_total_dose:
         meta.injected_activity = meta.radionuclide_total_dose
-    
+
     # Image Information
     meta.image_type = safe_getattr(ds, 'ImageType')
     meta.pixel_spacing = safe_getattr(ds, 'PixelSpacing')
@@ -538,13 +541,13 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
                 tag = block.get_tag(element_offset)
                 if tag in ds:
                     return ds[tag].value
-        except Exception:
+        except (AttributeError, KeyError, TypeError, ValueError):
             pass
         try:
             elem = ds.get((0x0013, 0x1000 + element_offset))
             if elem is not None:
                 return elem.value
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             pass
         return None
 
@@ -578,7 +581,7 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     meta.private_tags = extract_private_tags(ds, meta)
     if meta.private_tags:
         fingerprint_items = [
-            f"{tag.get('creator','')}|{tag.get('group_hex','')}|{tag.get('element_hex','')}|{tag.get('value_hash','')}"
+            f"{tag.get('creator', '')}|{tag.get('group_hex', '')}|{tag.get('element_hex', '')}|{tag.get('value_hash', '')}"
             for tag in meta.private_tags
         ]
         fingerprint_items.sort()
@@ -596,7 +599,7 @@ def extract_metadata_from_paths(
     filtered_paths = [
         dcm_path
         for dcm_path in dcm_paths
-        if not (dcm_path.name.startswith("._") or "__MACOSX" in str(dcm_path))
+        if not is_metadata_artifact(dcm_path)
     ]
 
     if not filtered_paths:
@@ -624,7 +627,7 @@ def extract_all_metadata(
     max_workers: Optional[int] = None,
 ) -> List[Tuple[Path, DICOMMetadata]]:
     """Extract metadata from all DICOM files in a directory using a process pool."""
-    dcm_files = list(directory.rglob("*.dcm"))
+    dcm_files = collect_dicom_files(directory)
     return extract_metadata_from_paths(
         dcm_files,
         max_workers=max_workers,

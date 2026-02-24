@@ -6,19 +6,21 @@ Also supports ZIP and 7Z archive files
 """
 
 import argparse
-import warnings
-import itertools
 import os
-import tempfile
 import shutil
+import sqlite3
+import tempfile
 import time
+import warnings
 import zipfile
 from datetime import datetime
-import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from dicom_discovery import collect_dicom_files, is_dicom_candidate
 from extract_metadata import extract_metadata_from_paths
 from store_metadata import init_database
+
 warnings.filterwarnings(
     "ignore",
     message="Invalid value for VR UI"
@@ -65,7 +67,7 @@ def _parse_time_to_24hour(time_str: Optional[object]):
             minutes = int(text[2:4])
             seconds = int(text[4:6])
             return hours, minutes, seconds
-    except Exception:
+    except (TypeError, ValueError):
         return None
     return None
 
@@ -91,7 +93,7 @@ def _calculate_injection_delay(injection_date, injection_time, acquisition_date,
             acq_time_parsed[0], acq_time_parsed[1], acq_time_parsed[2]
         )
         return (acq_dt - inj_dt).total_seconds() / 60
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -163,7 +165,7 @@ def prune_non_representative_series(conn: sqlite3.Connection) -> int:
         LEFT JOIN study_weights w ON m.study_instance_uid = w.study_instance_uid
     """)
     columns = [col[0] for col in cursor.description]
-    rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    rows = [dict(zip(columns, row, strict=False)) for row in cursor.fetchall()]
     if not rows:
         return 0
     keep_series = _select_representative_series(rows)
@@ -202,7 +204,7 @@ def _bulk_insert_metadata(
 
     def _flush() -> None:
         nonlocal processed, skipped_duplicates, skipped_invalid
-        for meta_item, file_path_str in zip(batch_metadata, batch_paths):
+        for meta_item, file_path_str in zip(batch_metadata, batch_paths, strict=False):
             inserted, reason = insert_metadata(
                 conn,
                 meta_item,
@@ -234,6 +236,60 @@ def _bulk_insert_metadata(
 
     return processed, skipped_duplicates, skipped_invalid
 
+
+def _filter_existing_paths(
+    file_paths: List[Path],
+    base_dir: Path,
+    existing_paths: Optional[set],
+) -> Tuple[List[Path], int]:
+    if not existing_paths:
+        return file_paths, 0
+
+    filtered_files: List[Path] = []
+    skipped_existing = 0
+    for file_path in file_paths:
+        rel_path = str(file_path.relative_to(base_dir))
+        if rel_path in existing_paths:
+            skipped_existing += 1
+            continue
+        filtered_files.append(file_path)
+    return filtered_files, skipped_existing
+
+
+def _extract_and_store(
+    conn: sqlite3.Connection,
+    dcm_files: List[Path],
+    rel_base: Path,
+    scan_root: str,
+    max_workers: Optional[int],
+    progress_total: Optional[int] = None,
+    vprint=None,
+) -> Tuple[int, int, int, List[Tuple[Path, object]], Dict[str, float]]:
+    timings: Dict[str, float] = {}
+
+    t_extract = time.perf_counter()
+    metadata_entries = extract_metadata_from_paths(
+        dcm_files,
+        max_workers=max_workers,
+    )
+    timings["extract_metadata_s"] = time.perf_counter() - t_extract
+    skipped_invalid = len(dcm_files) - len(metadata_entries)
+
+    t_insert = time.perf_counter()
+    processed, skipped_dup_insert, skipped_invalid_insert = _bulk_insert_metadata(
+        conn,
+        metadata_entries,
+        rel_base,
+        scan_root,
+        progress_total=progress_total,
+        vprint=vprint,
+    )
+    timings["insert_metadata_s"] = time.perf_counter() - t_insert
+    skipped_invalid += skipped_invalid_insert
+
+    return processed, skipped_dup_insert, skipped_invalid, metadata_entries, timings
+
+
 def process_single_scan(
     scan_dir: Path,
     conn,
@@ -248,36 +304,28 @@ def process_single_scan(
     timings: Dict[str, float] = {}
     t0 = time.perf_counter()
 
-    dcm_files = [
-        f for f in scan_dir.rglob("*.dcm")
-        if not f.name.startswith('._') and '__MACOSX' not in str(f)
-    ]
-
-    if existing_paths:
-        filtered_files = []
-        skipped_existing = 0
-        for file_path in dcm_files:
-            rel_path = str(file_path.relative_to(base_dir))
-            if rel_path in existing_paths:
-                skipped_existing += 1
-            else:
-                filtered_files.append(file_path)
-        dcm_files = filtered_files
-    else:
-        skipped_existing = 0
+    dcm_files = collect_dicom_files(scan_dir, recursive=True)
+    dcm_files, skipped_existing = _filter_existing_paths(
+        dcm_files,
+        base_dir,
+        existing_paths,
+    )
 
     if not dcm_files:
         return 0, 0, 0, [], timings
 
     timings["scan_dicom_files_s"] = time.perf_counter() - t0
 
-    t_extract = time.perf_counter()
-    metadata_entries = extract_metadata_from_paths(
+    processed, skipped_dup_insert, skipped_invalid, metadata_entries, extract_insert_timings = _extract_and_store(
+        conn,
         dcm_files,
+        base_dir,
+        scan_root,
         max_workers=max_workers,
+        progress_total=None,
+        vprint=None,
     )
-    timings["extract_metadata_s"] = time.perf_counter() - t_extract
-    skipped_invalid = len(dcm_files) - len(metadata_entries)
+    timings.update(extract_insert_timings)
 
     new_studies = set()
     seen_studies = set()
@@ -287,19 +335,10 @@ def process_single_scan(
             if not study_exists(conn, meta.study_instance_uid):
                 new_studies.add(meta.study_instance_uid)
 
-    t_insert = time.perf_counter()
-    processed, skipped_duplicates, skipped_invalid_insert = _bulk_insert_metadata(
-        conn,
-        metadata_entries,
-        base_dir,
-        scan_root,
-    )
-    timings["insert_metadata_s"] = time.perf_counter() - t_insert
-
     return (
         processed,
-        skipped_duplicates + skipped_existing,
-        skipped_invalid + skipped_invalid_insert,
+        skipped_dup_insert + skipped_existing,
+        skipped_invalid,
         list(new_studies),
         timings,
     )
@@ -317,7 +356,7 @@ def process_directory(
     scan_root_label: Optional[str] = None,
 ):
     """Process all DICOM files in a directory, ZIP, or 7Z file and store metadata.
-    
+
     Args:
         dicom_dir: Directory containing DICOM files, subdirectories with scans, or a ZIP/7Z archive file
         db_path: Path to SQLite database file
@@ -352,16 +391,7 @@ def process_directory(
             print(message)
 
     def _sample_dicom_files(sample_root: Path, limit: int = 200) -> List[Path]:
-        if not sample_root.is_dir():
-            return []
-        sample: List[Path] = []
-        for file_path in itertools.islice(sample_root.rglob("*.dcm"), limit * 10):
-            if file_path.name.startswith("._") or "__MACOSX" in str(file_path):
-                continue
-            sample.append(file_path)
-            if len(sample) >= limit:
-                break
-        return sample
+        return collect_dicom_files(sample_root, recursive=True, limit=limit)
 
     def _auto_tune_workers(sample_paths: List[Path]) -> Optional[int]:
         if not sample_paths:
@@ -388,13 +418,13 @@ def process_directory(
                 best_workers = workers
         _vprint(f"   Auto-tune selected {best_workers} workers")
         return best_workers
-    
+
     if not dicom_path.exists():
         _vprint(f"Error: Path {dicom_dir} does not exist")
         return
 
     print(f"Starting processing: {dicom_path}")
-    
+
     # Check if input is a ZIP or 7Z file
     temp_extract_dir = None
     extract_timings: Dict[str, float] = {}
@@ -402,26 +432,26 @@ def process_directory(
         filename_lower = dicom_path.name.lower()
         if filename_lower.endswith('.zip') or filename_lower.endswith('.7z'):
             _vprint(f"📦 Detected archive file: {dicom_path.name}")
-            _vprint(f"   Extracting to temporary directory...")
-            
+            _vprint("   Extracting to temporary directory...")
+
             # Create temporary directory for extraction
             temp_extract_dir = tempfile.mkdtemp(prefix='dicom_process_')
             extract_dir = Path(temp_extract_dir)
-            
+
             try:
                 t_archive = time.perf_counter()
                 if filename_lower.endswith('.zip'):
                     # Extract ZIP file
                     with zipfile.ZipFile(dicom_path, 'r') as zip_ref:
                         zip_ref.extractall(extract_dir)
-                    _vprint(f"   ✓ Extracted ZIP file")
+                    _vprint("   ✓ Extracted ZIP file")
                 elif filename_lower.endswith('.7z'):
                     # Extract 7Z file
                     try:
                         import py7zr  # type: ignore[import]
                         with py7zr.SevenZipFile(dicom_path, mode='r') as archive:
                             archive.extractall(extract_dir)
-                        _vprint(f"   ✓ Extracted 7Z file")
+                        _vprint("   ✓ Extracted 7Z file")
                     except ImportError:
                         # Fallback to system 7z command
                         import subprocess
@@ -431,31 +461,31 @@ def process_directory(
                             text=True
                         )
                         if result.returncode != 0:
-                            _vprint(f"   ✗ Error: Failed to extract 7Z file")
-                            _vprint(f"   Install py7zr: pip install py7zr")
-                            _vprint(f"   Or ensure system 7z command is available")
+                            _vprint("   ✗ Error: Failed to extract 7Z file")
+                            _vprint("   Install py7zr: pip install py7zr")
+                            _vprint("   Or ensure system 7z command is available")
                             try:
                                 shutil.rmtree(temp_extract_dir)
-                            except:
+                            except OSError:
                                 pass
                             _print_timing()
                             return
-                        _vprint(f"   ✓ Extracted 7Z file (using system 7z)")
+                        _vprint("   ✓ Extracted 7Z file (using system 7z)")
                 extract_timings["archive_extract_s"] = time.perf_counter() - t_archive
-                
+
                 # Update path to extracted directory
                 dicom_path = extract_dir
                 _vprint()
-            except Exception as e:
+            except (OSError, ValueError, zipfile.BadZipFile) as e:
                 _vprint(f"   ✗ Error extracting archive: {e}")
                 try:
                     shutil.rmtree(temp_extract_dir)
-                except:
+                except OSError:
                     pass
                 return
-    
+
     # Now process as a directory (original logic continues)
-    
+
     # Initialize database
     conn = init_database(db_path)
 
@@ -464,275 +494,283 @@ def process_directory(
         tuned_workers = _auto_tune_workers(sample_paths)
         if tuned_workers:
             max_workers = tuned_workers
-    
+
     existing_paths = None
     if skip_existing_paths:
         rows = conn.execute("SELECT file_path FROM dicom_metadata").fetchall()
         existing_paths = {row[0] for row in rows}
 
-    # Check if directory contains subdirectories (works with any directory names)
-    subdirs = [d for d in dicom_path.iterdir() if d.is_dir() and not d.name.startswith('.')]
-    
-    # Decide whether to process subdirectories or files directly
-    if process_subdirs and subdirs:
-        # Check if subdirectories contain DICOM files (generic check - works with any directory names)
-        has_dicom_in_subdirs = False
-        for subdir in subdirs:
-            dcm_check = list(subdir.rglob("*.dcm"))
-            if dcm_check:
-                # Filter out macOS metadata files
-                valid_dcm = [f for f in dcm_check if not f.name.startswith('._') and '__MACOSX' not in str(f)]
-                if valid_dcm:
-                    has_dicom_in_subdirs = True
-                    break
-        
-        if has_dicom_in_subdirs:
-            # Process each subdirectory as a separate scan
-            _vprint(f"📂 Processing multiple scans in: {dicom_path}")
-            _vprint(f"   Found {len(subdirs)} subdirectories\n")
-            
-            total_processed = 0
-            total_skipped_duplicates = 0
-            total_skipped_invalid = 0
-            total_existing_studies = 0
-            
-            # First, check if there are DICOM files directly in the root directory
-            root_dcm_files = [
-                f for f in dicom_path.glob("*.dcm")
-                if not f.name.startswith('._') and '__MACOSX' not in str(f)
-            ]
-            
-            if root_dcm_files:
-                _vprint(f"   [0/{len(subdirs)+1}] Processing root directory files ({len(root_dcm_files)} file(s))")
-                processed, skipped_dup, skipped_inv, new_studies, scan_timings = process_single_scan(
-                    dicom_path,
-                    conn,
-                    dicom_path,
-                    max_workers=max_workers,
-                    existing_paths=existing_paths,
-                    scan_root_label=scan_root_label,
-                )
-                if timing and scan_timings:
-                    _vprint(f"      ⏱️ scan timings:")
-                    for label, seconds in scan_timings.items():
-                        _vprint(f"         - {label}: {seconds:.2f}s")
-                total_processed += processed
-                total_skipped_duplicates += skipped_dup
-                total_skipped_invalid += skipped_inv
-                
-                status_parts = []
-                if processed > 0:
-                    if new_studies:
-                        status_parts.append(f"Added {processed} new files ({len(new_studies)} new study/studies)")
-                    else:
-                        status_parts.append(f"Added {processed} new series to existing study/studies")
-                
-                if skipped_dup > 0:
-                    if processed == 0:
-                        status_parts.append(f"All series already exist, skipped {skipped_dup} files")
-                    else:
-                        status_parts.append(f"Skipped {skipped_dup} duplicate series")
-                
-                if skipped_inv > 0:
-                    status_parts.append(f"Skipped {skipped_inv} invalid files")
-                
-                if status_parts:
-                    _vprint(f"      ✓ {' | '.join(status_parts)}")
-                else:
-                    _vprint(f"      ✓ Processed {processed} files")
-                _vprint()  # Blank line before subdirectories
-            
-            # Process each subdirectory as a separate scan
-            for idx, scan_dir in enumerate(subdirs, 1):
-                offset = 1 if root_dcm_files else 0
-                _vprint(f"   [{idx+offset}/{len(subdirs)+offset}] Processing: {scan_dir.name}")
-                processed, skipped_dup, skipped_inv, new_studies, scan_timings = process_single_scan(
-                    scan_dir,
-                    conn,
-                    dicom_path,
-                    max_workers=max_workers,
-                    existing_paths=existing_paths,
-                    scan_root_label=scan_root_label,
-                )
-                if timing and scan_timings:
-                    _vprint(f"      ⏱️ scan timings:")
-                    for label, seconds in scan_timings.items():
-                        _vprint(f"         - {label}: {seconds:.2f}s")
-                total_processed += processed
-                total_skipped_duplicates += skipped_dup
-                total_skipped_invalid += skipped_inv
-                
-                # Build status message
-                status_parts = []
-                if processed > 0:
-                    if new_studies:
-                        status_parts.append(f"Added {processed} new files ({len(new_studies)} new study/studies)")
-                    else:
-                        status_parts.append(f"Added {processed} new series to existing study/studies")
-                
-                if skipped_dup > 0:
-                    if processed == 0:
-                        status_parts.append(f"All series already exist, skipped {skipped_dup} files")
-                    else:
-                        status_parts.append(f"Skipped {skipped_dup} duplicate series")
-                
-                if skipped_inv > 0:
-                    status_parts.append(f"Skipped {skipped_inv} invalid files")
-                
-                if status_parts:
-                    _vprint(f"      ✓ {' | '.join(status_parts)}")
-                else:
-                    _vprint(f"      ✓ Processed {processed} files")
-                
-                # Track existing studies for summary
-                if processed == 0 and skipped_dup > 0:
-                    total_existing_studies += 1
-            
-            _vprint(f"\n   ✅ Summary:")
-            _vprint(f"      • New files added: {total_processed}")
-            if total_skipped_duplicates > 0:
-                _vprint(f"      • Duplicate files skipped: {total_skipped_duplicates}")
-            if total_skipped_invalid > 0:
-                _vprint(f"      • Invalid files skipped: {total_skipped_invalid}")
-            if total_existing_studies > 0:
-                _vprint(f"      • Scans already in database: {total_existing_studies}")
-        else:
-            # Process files directly (recursive)
-            _vprint(f"📂 Processing DICOM files in: {dicom_path} (recursive)")
-            dcm_files = [
-                f for f in dicom_path.rglob("*.dcm")
-                if not f.name.startswith('._') and '__MACOSX' not in str(f)
-            ]
-            scan_root = scan_root_label or str(dicom_path.resolve())
-
-            if existing_paths:
-                filtered_files = []
-                skipped_existing = 0
-                for file_path in dcm_files:
-                    rel_path = str(file_path.relative_to(dicom_path))
-                    if rel_path in existing_paths:
-                        skipped_existing += 1
-                    else:
-                        filtered_files.append(file_path)
-                dcm_files = filtered_files
-            else:
-                skipped_existing = 0
-            
-            if not dcm_files:
-                _vprint("   ⚠️  No DICOM files found")
-                conn.close()
-                _print_timing()
-                return
-            
-            _vprint(f"   📄 Found {len(dcm_files)} DICOM files")
-            
-            t_extract = time.perf_counter()
-            metadata_entries = extract_metadata_from_paths(
-                dcm_files,
-                max_workers=max_workers,
-            )
-            extract_timings["extract_metadata_s"] = time.perf_counter() - t_extract
-            skipped_invalid = len(dcm_files) - len(metadata_entries)
-            t_insert = time.perf_counter()
-            processed, skipped_dup_insert, skipped_invalid_insert = _bulk_insert_metadata(
-                conn,
-                metadata_entries,
-                dicom_path,
-                scan_root,
-                progress_total=len(dcm_files),
-                vprint=_vprint,
-            )
-            extract_timings["insert_metadata_s"] = time.perf_counter() - t_insert
-            skipped_duplicates = skipped_existing + skipped_dup_insert
-            skipped_invalid += skipped_invalid_insert
-            
-            if skipped_duplicates > 0:
-                _vprint(f"   ⚠️  Skipped {skipped_duplicates} duplicate files")
-            if skipped_invalid > 0:
-                _vprint(f"   ⚠️  Skipped {skipped_invalid} invalid files")
-            
-            _vprint(f"   ✅ Added {processed} new files to database")
-    else:
-        # Process files directly (single directory or no subdirs)
-        _vprint(f"📂 Processing DICOM files in: {dicom_path}")
-        dcm_files = [
-            f for f in dicom_path.rglob("*.dcm")
-            if not f.name.startswith('._') and '__MACOSX' not in str(f)
-        ]
-        scan_root = scan_root_label or str(dicom_path.resolve())
+    if dicom_path.is_file():
+        _vprint(f"📄 Processing single file: {dicom_path.name}")
+        dcm_files = [dicom_path] if is_dicom_candidate(dicom_path) else []
+        scan_root = scan_root_label or str(dicom_path.parent.resolve())
 
         if existing_paths:
-            filtered_files = []
-            skipped_existing = 0
-            for file_path in dcm_files:
-                rel_path = str(file_path.relative_to(dicom_path))
-                if rel_path in existing_paths:
-                    skipped_existing += 1
-                else:
-                    filtered_files.append(file_path)
-            dcm_files = filtered_files
+            rel_path = dicom_path.name
+            if rel_path in existing_paths:
+                dcm_files = []
+                skipped_existing = 1
+            else:
+                skipped_existing = 0
         else:
             skipped_existing = 0
-        
+
         if not dcm_files:
             _vprint("   ⚠️  No DICOM files found")
             conn.close()
             if temp_extract_dir:
                 try:
                     shutil.rmtree(temp_extract_dir)
-                    _vprint(f"   Cleaned up temporary extraction directory")
-                except:
+                    _vprint("   Cleaned up temporary extraction directory")
+                except OSError:
                     pass
             _print_timing()
             return
-        
-        _vprint(f"   📄 Found {len(dcm_files)} DICOM files")
-        
-        t_extract = time.perf_counter()
-        metadata_entries = extract_metadata_from_paths(
-            dcm_files,
-            max_workers=max_workers,
-        )
-        extract_timings["extract_metadata_s"] = time.perf_counter() - t_extract
-        skipped_invalid = len(dcm_files) - len(metadata_entries)
-        t_insert = time.perf_counter()
-        processed, skipped_dup_insert, skipped_invalid_insert = _bulk_insert_metadata(
+
+        processed, skipped_dup_insert, skipped_invalid, _metadata_entries, run_timings = _extract_and_store(
             conn,
-            metadata_entries,
-            dicom_path,
+            dcm_files,
+            dicom_path.parent,
             scan_root,
+            max_workers=max_workers,
             progress_total=len(dcm_files),
             vprint=_vprint,
         )
-        extract_timings["insert_metadata_s"] = time.perf_counter() - t_insert
+        extract_timings.update(run_timings)
         skipped_duplicates = skipped_existing + skipped_dup_insert
-        skipped_invalid += skipped_invalid_insert
-        
+
         if skipped_duplicates > 0:
             _vprint(f"   ⚠️  Skipped {skipped_duplicates} duplicate files")
         if skipped_invalid > 0:
             _vprint(f"   ⚠️  Skipped {skipped_invalid} invalid files")
-        
+
         _vprint(f"   ✅ Added {processed} new files to database")
-    
+    elif dicom_path.is_dir():
+        # Check if directory contains subdirectories (works with any directory names)
+        subdirs = [d for d in dicom_path.iterdir() if d.is_dir() and not d.name.startswith('.')]
+
+        # Decide whether to process subdirectories or files directly
+        if process_subdirs and subdirs:
+            # Check if subdirectories contain DICOM files (generic check - works with any directory names)
+            has_dicom_in_subdirs = False
+            for subdir in subdirs:
+                if collect_dicom_files(subdir, recursive=True, limit=1):
+                    has_dicom_in_subdirs = True
+                    break
+
+            if has_dicom_in_subdirs:
+                # Process each subdirectory as a separate scan
+                _vprint(f"📂 Processing multiple scans in: {dicom_path}")
+                _vprint(f"   Found {len(subdirs)} subdirectories\n")
+
+                total_processed = 0
+                total_skipped_duplicates = 0
+                total_skipped_invalid = 0
+                total_existing_studies = 0
+
+                # First, check if there are DICOM files directly in the root directory
+                root_dcm_files = collect_dicom_files(dicom_path, recursive=False)
+
+                if root_dcm_files:
+                    _vprint(f"   [0/{len(subdirs)+1}] Processing root directory files ({len(root_dcm_files)} file(s))")
+                    processed, skipped_dup, skipped_inv, new_studies, scan_timings = process_single_scan(
+                        dicom_path,
+                        conn,
+                        dicom_path,
+                        max_workers=max_workers,
+                        existing_paths=existing_paths,
+                        scan_root_label=scan_root_label,
+                    )
+                    if timing and scan_timings:
+                        _vprint("      ⏱️ scan timings:")
+                        for label, seconds in scan_timings.items():
+                            _vprint(f"         - {label}: {seconds:.2f}s")
+                    total_processed += processed
+                    total_skipped_duplicates += skipped_dup
+                    total_skipped_invalid += skipped_inv
+
+                    status_parts = []
+                    if processed > 0:
+                        if new_studies:
+                            status_parts.append(f"Added {processed} new files ({len(new_studies)} new study/studies)")
+                        else:
+                            status_parts.append(f"Added {processed} new series to existing study/studies")
+
+                    if skipped_dup > 0:
+                        if processed == 0:
+                            status_parts.append(f"All series already exist, skipped {skipped_dup} files")
+                        else:
+                            status_parts.append(f"Skipped {skipped_dup} duplicate series")
+
+                    if skipped_inv > 0:
+                        status_parts.append(f"Skipped {skipped_inv} invalid files")
+
+                    if status_parts:
+                        _vprint(f"      ✓ {' | '.join(status_parts)}")
+                    else:
+                        _vprint(f"      ✓ Processed {processed} files")
+                    _vprint()  # Blank line before subdirectories
+
+                # Process each subdirectory as a separate scan
+                for idx, scan_dir in enumerate(subdirs, 1):
+                    offset = 1 if root_dcm_files else 0
+                    _vprint(f"   [{idx+offset}/{len(subdirs)+offset}] Processing: {scan_dir.name}")
+                    processed, skipped_dup, skipped_inv, new_studies, scan_timings = process_single_scan(
+                        scan_dir,
+                        conn,
+                        dicom_path,
+                        max_workers=max_workers,
+                        existing_paths=existing_paths,
+                        scan_root_label=scan_root_label,
+                    )
+                    if timing and scan_timings:
+                        _vprint("      ⏱️ scan timings:")
+                        for label, seconds in scan_timings.items():
+                            _vprint(f"         - {label}: {seconds:.2f}s")
+                    total_processed += processed
+                    total_skipped_duplicates += skipped_dup
+                    total_skipped_invalid += skipped_inv
+
+                    # Build status message
+                    status_parts = []
+                    if processed > 0:
+                        if new_studies:
+                            status_parts.append(f"Added {processed} new files ({len(new_studies)} new study/studies)")
+                        else:
+                            status_parts.append(f"Added {processed} new series to existing study/studies")
+
+                    if skipped_dup > 0:
+                        if processed == 0:
+                            status_parts.append(f"All series already exist, skipped {skipped_dup} files")
+                        else:
+                            status_parts.append(f"Skipped {skipped_dup} duplicate series")
+
+                    if skipped_inv > 0:
+                        status_parts.append(f"Skipped {skipped_inv} invalid files")
+
+                    if status_parts:
+                        _vprint(f"      ✓ {' | '.join(status_parts)}")
+                    else:
+                        _vprint(f"      ✓ Processed {processed} files")
+
+                    # Track existing studies for summary
+                    if processed == 0 and skipped_dup > 0:
+                        total_existing_studies += 1
+
+                _vprint("\n   ✅ Summary:")
+                _vprint(f"      • New files added: {total_processed}")
+                if total_skipped_duplicates > 0:
+                    _vprint(f"      • Duplicate files skipped: {total_skipped_duplicates}")
+                if total_skipped_invalid > 0:
+                    _vprint(f"      • Invalid files skipped: {total_skipped_invalid}")
+                if total_existing_studies > 0:
+                    _vprint(f"      • Scans already in database: {total_existing_studies}")
+            else:
+                # Process files directly (recursive)
+                _vprint(f"📂 Processing DICOM files in: {dicom_path} (recursive)")
+                dcm_files = collect_dicom_files(dicom_path, recursive=True)
+                scan_root = scan_root_label or str(dicom_path.resolve())
+
+                dcm_files, skipped_existing = _filter_existing_paths(
+                    dcm_files,
+                    dicom_path,
+                    existing_paths,
+                )
+
+                if not dcm_files:
+                    _vprint("   ⚠️  No DICOM files found")
+                    conn.close()
+                    _print_timing()
+                    return
+
+                _vprint(f"   📄 Found {len(dcm_files)} DICOM files")
+
+                processed, skipped_dup_insert, skipped_invalid, _metadata_entries, run_timings = _extract_and_store(
+                    conn,
+                    dcm_files,
+                    dicom_path,
+                    scan_root,
+                    max_workers=max_workers,
+                    progress_total=len(dcm_files),
+                    vprint=_vprint,
+                )
+                extract_timings.update(run_timings)
+                skipped_duplicates = skipped_existing + skipped_dup_insert
+
+                if skipped_duplicates > 0:
+                    _vprint(f"   ⚠️  Skipped {skipped_duplicates} duplicate files")
+                if skipped_invalid > 0:
+                    _vprint(f"   ⚠️  Skipped {skipped_invalid} invalid files")
+
+                _vprint(f"   ✅ Added {processed} new files to database")
+        else:
+            # Process files directly (single directory or no subdirs)
+            _vprint(f"📂 Processing DICOM files in: {dicom_path}")
+            dcm_files = collect_dicom_files(dicom_path, recursive=True)
+            scan_root = scan_root_label or str(dicom_path.resolve())
+
+            dcm_files, skipped_existing = _filter_existing_paths(
+                dcm_files,
+                dicom_path,
+                existing_paths,
+            )
+
+            if not dcm_files:
+                _vprint("   ⚠️  No DICOM files found")
+                conn.close()
+                if temp_extract_dir:
+                    try:
+                        shutil.rmtree(temp_extract_dir)
+                        _vprint("   Cleaned up temporary extraction directory")
+                    except OSError:
+                        pass
+                _print_timing()
+                return
+
+            _vprint(f"   📄 Found {len(dcm_files)} DICOM files")
+
+            processed, skipped_dup_insert, skipped_invalid, _metadata_entries, run_timings = _extract_and_store(
+                conn,
+                dcm_files,
+                dicom_path,
+                scan_root,
+                max_workers=max_workers,
+                progress_total=len(dcm_files),
+                vprint=_vprint,
+            )
+            extract_timings.update(run_timings)
+            skipped_duplicates = skipped_existing + skipped_dup_insert
+
+            if skipped_duplicates > 0:
+                _vprint(f"   ⚠️  Skipped {skipped_duplicates} duplicate files")
+            if skipped_invalid > 0:
+                _vprint(f"   ⚠️  Skipped {skipped_invalid} invalid files")
+
+            _vprint(f"   ✅ Added {processed} new files to database")
+    else:
+        _vprint("Error: Input path must be a directory, archive, or DICOM file")
+        conn.close()
+        _print_timing()
+        return
+
     _vprint("\n   🧹 Marking representative series...")
     try:
         pruned = prune_non_representative_series(conn)
         conn.commit()
         _vprint(f"   ✓ Marked {pruned} non-representative series")
-    except Exception as e:
+    except sqlite3.Error as e:
         _vprint(f"   ⚠ Warning: Could not mark representative series: {e}")
 
     conn.close()
     _vprint(f"\n   💾 Database saved to: {db_path}")
-    
+
     # Clean up temporary directory if it was created from archive extraction
     if temp_extract_dir:
         try:
-            _vprint(f"   Cleaning up temporary extraction directory...")
+            _vprint("   Cleaning up temporary extraction directory...")
             shutil.rmtree(temp_extract_dir)
-            _vprint(f"   ✓ Cleaned up")
-        except Exception as e:
+            _vprint("   ✓ Cleaned up")
+        except OSError as e:
             _vprint(f"   ⚠ Warning: Could not clean up temp directory: {e}")
 
     print("Processing ended")

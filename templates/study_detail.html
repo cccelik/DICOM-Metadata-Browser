@@ -591,6 +591,7 @@
                 <table>
                     <thead>
                         <tr>
+                            <th>{{ t.row_number or '#' }}</th>
                             <th>{{ t.series_number }}</th>
                             <th>{{ t.description }}</th>
                             <th>{{ t.modality }}</th>
@@ -605,6 +606,7 @@
                     <tbody>
                         {% for s in series %}
                         <tr>
+                            <td>{{ loop.index }}</td>
                             <td>{{ s.series_number or 'N/A' }}</td>
                             <td>{{ s.series_description or 'N/A' }}</td>
                             <td>

@@ -5,6 +5,7 @@ Simple SQLite storage for DICOM metadata
 
 import sqlite3
 from typing import List
+
 from extract_metadata import DICOMMetadata
 
 DB_SCHEMA = """
@@ -12,7 +13,7 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_path TEXT,
     scan_root TEXT,
-    
+
     -- Patient Information
     patient_id TEXT,
     patient_name TEXT,
@@ -21,7 +22,7 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     patient_age TEXT,
     patient_weight REAL,
     patient_size REAL,
-    
+
     -- Study Information
     study_instance_uid TEXT,
     study_date TEXT,
@@ -30,7 +31,7 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     study_id TEXT,
     accession_number TEXT,
     referring_physician_name TEXT,
-    
+
     -- Series Information
     series_instance_uid TEXT UNIQUE,
     sop_instance_uid TEXT,
@@ -41,7 +42,7 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     protocol_name TEXT,
     modality TEXT,
     body_part_examined TEXT,
-    
+
     -- Manufacturer Information
     manufacturer TEXT,
     manufacturer_model_name TEXT,
@@ -50,7 +51,7 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     device_serial_number TEXT,
     institution_name TEXT,
     institution_address TEXT,
-    
+
     -- Acquisition Information
     acquisition_date TEXT,
     acquisition_time TEXT,
@@ -71,7 +72,7 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     exposure_time REAL,
     exposure REAL,
     tube_current REAL,
-    
+
     -- Nuclear Medicine Specific
     radiopharmaceutical TEXT,
     injected_activity REAL,
@@ -80,11 +81,11 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     injection_date TEXT,
     half_life REAL,
     decay_correction TEXT,
-    
+
     -- Additional Radiopharmaceutical Information
     radiopharmaceutical_volume REAL,  -- (0018,1071)
     radionuclide_total_dose REAL,  -- (0018,1074)
-    
+
     -- Image Information
     image_type TEXT,
     pixel_spacing TEXT,
@@ -107,8 +108,8 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     csa_series_header_hash TEXT,
     private_payload_fingerprint TEXT,
     is_representative INTEGER DEFAULT 0,
-    
-    
+
+
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -135,7 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_manufacturer_modality ON dicom_metadata(manufactu
 
 -- Full-text search index for text fields (if FTS5 available)
 -- CREATE VIRTUAL TABLE IF NOT EXISTS dicom_fts USING fts5(
---     patient_name, patient_id, study_description, 
+--     patient_name, patient_id, study_description,
 --     radiopharmaceutical, manufacturer, modality
 -- );
 
@@ -170,13 +171,13 @@ CREATE INDEX IF NOT EXISTS idx_private_classification ON private_tag(classificat
 
 def init_database(db_path: str, optimize: bool = True):
     """Initialize database with schema and performance optimizations
-    
+
     Args:
         db_path: Path to SQLite database file
         optimize: If True, apply performance optimizations for large datasets
     """
     conn = sqlite3.connect(db_path)
-    
+
     # Performance optimizations for large datasets
     if optimize:
         # Enable Write-Ahead Logging (WAL) mode for better concurrency and performance
@@ -193,7 +194,7 @@ def init_database(db_path: str, optimize: bool = True):
         conn.execute("PRAGMA mmap_size=268435456")  # 256MB
         # Optimize query planner
         conn.execute("PRAGMA optimize")
-    
+
     conn.executescript(DB_SCHEMA)
 
     # Ensure new columns exist in older databases
@@ -256,14 +257,14 @@ def insert_metadata(
     commit: bool = True
 ):
     """Insert metadata into database
-    
+
     Args:
         conn: Database connection
         metadata: DICOM metadata to insert
         file_path: Path to the DICOM file (relative or absolute)
         scan_root: Base directory used to resolve file_path (absolute if available)
         skip_existing: If True, skip if series already exists (prevents duplicates)
-    
+
     Returns:
         tuple: (inserted: bool, reason: str)
     """
@@ -272,16 +273,16 @@ def insert_metadata(
     data['file_path'] = file_path
     if scan_root:
         data['scan_root'] = scan_root
-    
+
     columns = ', '.join(data.keys())
     placeholders = ', '.join(['?' for _ in data])
     values = list(data.values())
-    
+
     query = f"""
     INSERT OR IGNORE INTO dicom_metadata ({columns})
     VALUES ({placeholders})
     """
-    
+
     try:
         cursor = conn.execute(query, values)
         if commit:
