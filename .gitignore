@@ -14,4 +14,4 @@
 !translations.py
 !templates/
 !templates/**
-!create_dicom_metadata.py
+!create_mock_dicom.py
