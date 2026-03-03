@@ -12,6 +12,18 @@ from pathlib import Path
 from dicom_discovery import is_dicom_candidate
 
 
+def _copy_api_path(path: Path) -> str:
+    """Return a path string suitable for Windows file copy APIs."""
+    path_str = str(path)
+    if os.name != "nt":
+        return path_str
+    if path_str.startswith("\\\\?\\"):
+        return path_str
+    if path_str.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path_str.lstrip("\\")
+    return "\\\\?\\" + path_str
+
+
 def find_series_samples(input_root: Path):
     samples = []
     for dirpath, _dirnames, filenames in os.walk(input_root):
@@ -32,9 +44,14 @@ def copy_samples(samples, input_root: Path, output_root: Path) -> int:
     for file_path in samples:
         rel_dir = file_path.parent.relative_to(input_root)
         dest_dir = output_root / rel_dir
-        dest_dir.mkdir(parents=True, exist_ok=True)
+        os.makedirs(_copy_api_path(dest_dir), exist_ok=True)
         dest_path = dest_dir / file_path.name
-        shutil.copy2(file_path, dest_path)
+        try:
+            shutil.copy2(_copy_api_path(file_path), _copy_api_path(dest_path))
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"{exc}. Source: {file_path}. Destination: {dest_path}"
+            ) from exc
         copied += 1
     return copied
 

@@ -8,18 +8,30 @@ import io
 import math
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import statistics
+import string
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
-from flask import Flask, Response, jsonify, render_template, request, send_from_directory, session
+from flask import (
+    Flask,
+    Response,
+    after_this_request,
+    jsonify,
+    render_template,
+    request,
+    send_file,
+    send_from_directory,
+    session,
+)
 
 from process_dicom import process_directory
 from store_metadata import init_database
@@ -237,6 +249,23 @@ EXPORT_NUMERIC_FORMATS = {
     "half_life": ("s", 2),
 }
 
+ANONYMIZE_FIELDS = [
+    {"name": "patient_name", "label_key": "patient_name", "default": True},
+    {"name": "patient_id", "label_key": "patient_id", "default": True},
+    {"name": "patient_birth_date", "label_key": "patient_birth_date"},
+    {"name": "study_id", "label_key": "study_id"},
+    {"name": "accession_number", "label_key": "accession_number"},
+    {"name": "referring_physician_name", "label_key": "referring_physician"},
+    {"name": "institution_name", "label_key": "institution"},
+    {"name": "institution_address", "label_key": "institution_address"},
+    {"name": "ctp_subject_id", "label_key": "ctp_subject_id"},
+    {"name": "ctp_collection", "label_key": "ctp_collection"},
+    {"name": "file_path", "label_key": "file_path"},
+]
+
+ANONYMIZE_FIELD_ORDER = [field["name"] for field in ANONYMIZE_FIELDS]
+ANONYMIZE_DEFAULT_FIELDS = [field["name"] for field in ANONYMIZE_FIELDS if field.get("default")]
+
 
 def ensure_databank_dir() -> None:
     DATABANK_DIR.mkdir(parents=True, exist_ok=True)
@@ -289,6 +318,20 @@ def build_export_sections(translations: dict) -> tuple[List[dict], dict]:
             "fields": fields,
         })
     return sections, label_map
+
+
+def build_anonymize_fields(translations: dict) -> List[dict]:
+    fields = []
+    for field in ANONYMIZE_FIELDS:
+        field_name = field["name"]
+        label_key = field.get("label_key", field_name)
+        label = translations.get(label_key, label_key.replace("_", " ").title())
+        fields.append({
+            "name": field_name,
+            "label": label,
+            "default": field.get("default", False),
+        })
+    return fields
 
 
 def sanitize_filename(value: str, fallback: str = "export") -> str:
@@ -434,6 +477,36 @@ def format_export_value(field_name: str, row_dict: dict) -> str:
     return str(value)
 
 
+def _generate_anonymized_value(field_name: str, index: int) -> str:
+    prefix = re.sub(r"[^A-Za-z0-9]+", "", field_name).upper()[:10] or "FIELD"
+    token = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+    return f"{prefix}_{index:04d}_{token}"
+
+
+def _anonymize_column(conn: sqlite3.Connection, field_name: str) -> int:
+    cursor = conn.execute(
+        f"""
+        SELECT DISTINCT "{field_name}"
+        FROM dicom_metadata
+        WHERE "{field_name}" IS NOT NULL
+          AND TRIM(CAST("{field_name}" AS TEXT)) != ''
+        """
+    )
+    values = [row[0] for row in cursor.fetchall()]
+    if not values:
+        return 0
+
+    replacements = [
+        (_generate_anonymized_value(field_name, idx), original)
+        for idx, original in enumerate(values, start=1)
+    ]
+    conn.executemany(
+        f'UPDATE dicom_metadata SET "{field_name}" = ? WHERE "{field_name}" = ?',
+        replacements
+    )
+    return len(values)
+
+
 @app.route('/databanks/create', methods=['POST'])
 def create_databank():
     db_name = normalize_db_name(request.form.get('name'))
@@ -448,6 +521,60 @@ def create_databank():
         return jsonify({'success': True, 'name': db_name})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/databanks/export-anonymized')
+def export_anonymized_databank():
+    db_name = normalize_db_name(request.args.get("db"))
+    db_path = resolve_db_path(db_name)
+    if not os.path.exists(db_path):
+        return f"Database not found: {db_path}", 404
+
+    requested_fields = request.args.getlist("fields")
+    selected_fields = [name for name in ANONYMIZE_FIELD_ORDER if name in requested_fields]
+    if not selected_fields:
+        selected_fields = list(ANONYMIZE_DEFAULT_FIELDS)
+
+    fd, temp_path = tempfile.mkstemp(prefix="anonymized_", suffix=".db")
+    os.close(fd)
+    shutil.copy2(db_path, temp_path)
+
+    conn = None
+    try:
+        conn = sqlite3.connect(temp_path)
+        cursor = conn.execute("PRAGMA table_info(dicom_metadata)")
+        existing_columns: Set[str] = {str(row[1]) for row in cursor.fetchall()}
+        applicable_fields = [field for field in selected_fields if field in existing_columns]
+        for field_name in applicable_fields:
+            _anonymize_column(conn, field_name)
+        conn.commit()
+    except Exception as exc:
+        if conn is not None:
+            conn.close()
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        return f"Failed to anonymize databank: {exc}", 500
+    finally:
+        if conn is not None:
+            conn.close()
+
+    @after_this_request
+    def _cleanup_export_file(response):
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        return response
+
+    export_name = sanitize_filename(f"{Path(db_name).stem}_anonymized") + ".db"
+    return send_file(
+        temp_path,
+        mimetype="application/octet-stream",
+        as_attachment=True,
+        download_name=export_name,
+    )
 
 
 def get_language():
@@ -1306,6 +1433,7 @@ def index():
         radiopharmaceutical_filters=radiopharmaceutical_filters,
         translations=translations,
     )
+    context["anonymize_fields"] = build_anonymize_fields(translations)
 
     if not os.path.exists(db_path):
         context["error"] = "Database not found"

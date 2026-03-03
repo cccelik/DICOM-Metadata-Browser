@@ -305,6 +305,7 @@
 
     </style>
     {% include "partials/top_bar/styles.html" %}
+    {% include "partials/modals/export/styles.html" %}
     {% include "partials/create_databank_styles.html" %}
 </head>
 <body>
@@ -313,6 +314,7 @@
     {% set databank_url_template = '/?db=%s&lang=%s' %}
     {% call render_top_bar('top-index-hamburger', 'top-index-menu', '&nbsp;', lang_url_template, databank_url_template, t, lang, db_name, databanks) %}
         <a href="/dashboard?db={{ db_name }}">{{ t.dashboard }}</a>
+        <button type="button" onclick="openAnonymizeDbModal(); closeTopMenu();" class="menu-upload">{{ t.export_db or 'Export Database' }}</button>
         <button type="button" onclick="toggleUploadZone(); closeTopMenu();" class="menu-upload">{{ t.upload }}</button>
     {% endcall %}
     <div class="container">
@@ -535,6 +537,8 @@
         {% endif %}
     </div>
 
+    {% include "partials/modals/anonymized_export/modal.html" %}
+
     {% include "partials/create_databank_modal.html" %}
 
     <script>
@@ -545,6 +549,28 @@
         const progressText = document.getElementById('progress-text');
         const filtersToggle = document.getElementById('filters-toggle');
         const filtersPanel = document.getElementById('filters-panel');
+        const anonymizeDbModal = document.getElementById('anonymize-db-modal');
+        const anonymizeDbFields = Array.from(document.querySelectorAll('.anonymize-db-field-toggle'));
+        const anonymizeDbSelectAll = document.getElementById('anonymize-db-select-all');
+        const anonymizeDbSelectNone = document.getElementById('anonymize-db-select-none');
+        const anonymizeDbConfirm = document.getElementById('anonymize-db-confirm');
+        const anonymizeDbCloseButtons = document.querySelectorAll('[data-anonymize-db-close]');
+
+        function openAnonymizeDbModal() {
+            if (!anonymizeDbModal) {
+                return;
+            }
+            anonymizeDbModal.classList.add('open');
+            anonymizeDbModal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeAnonymizeDbModal() {
+            if (!anonymizeDbModal) {
+                return;
+            }
+            anonymizeDbModal.classList.remove('open');
+            anonymizeDbModal.setAttribute('aria-hidden', 'true');
+        }
 
         function toggleUploadZone() {
             if (uploadZone.style.display === 'none' || uploadZone.style.display === '') {
@@ -563,6 +589,52 @@
             filtersToggle.addEventListener('click', () => {
                 const isOpen = filtersPanel.classList.toggle('open');
                 filtersToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+        }
+
+        anonymizeDbCloseButtons.forEach(button => {
+            button.addEventListener('click', closeAnonymizeDbModal);
+        });
+
+        if (anonymizeDbModal) {
+            anonymizeDbModal.addEventListener('click', (event) => {
+                if (event.target === anonymizeDbModal) {
+                    closeAnonymizeDbModal();
+                }
+            });
+        }
+
+        if (anonymizeDbSelectAll) {
+            anonymizeDbSelectAll.addEventListener('click', () => {
+                anonymizeDbFields.forEach(field => {
+                    field.checked = true;
+                });
+            });
+        }
+
+        if (anonymizeDbSelectNone) {
+            anonymizeDbSelectNone.addEventListener('click', () => {
+                anonymizeDbFields.forEach(field => {
+                    field.checked = false;
+                });
+            });
+        }
+
+        if (anonymizeDbConfirm) {
+            anonymizeDbConfirm.addEventListener('click', () => {
+                const selectedFields = anonymizeDbFields
+                    .filter(field => field.checked)
+                    .map(field => field.dataset.anonymizeField);
+                if (!selectedFields.length) {
+                    alert('{{ t.export_db_select_one or "Select at least one field to anonymize." }}');
+                    return;
+                }
+                const params = new URLSearchParams();
+                params.set('db', '{{ db_name }}');
+                params.set('lang', '{{ lang }}');
+                selectedFields.forEach(field => params.append('fields', field));
+                window.location.href = `/databanks/export-anonymized?${params.toString()}`;
+                closeAnonymizeDbModal();
             });
         }
 

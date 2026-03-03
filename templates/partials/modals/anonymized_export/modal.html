@@ -1,0 +1,36 @@
+<div id="anonymize-db-modal" class="export-modal" aria-hidden="true">
+    <div class="export-modal-content" role="dialog" aria-modal="true" aria-labelledby="anonymize-db-modal-title">
+        <div class="export-modal-header">
+            <h3 id="anonymize-db-modal-title">{{ t.export_db_title or 'Export Anonymized Database' }}</h3>
+            <button type="button" class="export-modal-close" data-anonymize-db-close aria-label="{{ t.close }}">×</button>
+        </div>
+        <div class="export-modal-body">
+            <div class="export-modal-actions">
+                <div><strong>{{ t.export_db_select_fields or 'Choose fields to anonymize' }}</strong></div>
+                <div class="export-action-group">
+                    <button type="button" class="export-small-button" id="anonymize-db-select-all">{{ t.export_select_all }}</button>
+                    <button type="button" class="export-small-button" id="anonymize-db-select-none">{{ t.export_select_none }}</button>
+                </div>
+            </div>
+            <div class="export-section">
+                <div class="export-field-grid">
+                    {% for field in anonymize_fields %}
+                    <label class="export-field">
+                        <input
+                            type="checkbox"
+                            class="anonymize-db-field-toggle"
+                            data-anonymize-field="{{ field.name }}"
+                            {% if field.default %}checked{% endif %}
+                        >
+                        <span>{{ field.label }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        <div class="export-modal-footer">
+            <button type="button" class="export-secondary" data-anonymize-db-close>{{ t.cancel }}</button>
+            <button type="button" class="export-primary" id="anonymize-db-confirm">{{ t.export_db_download or 'Download Anonymized DB' }}</button>
+        </div>
+    </div>
+</div>
