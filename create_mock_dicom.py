@@ -93,18 +93,10 @@ def _build_mock_dataset(
     rad_info_item.Radiopharmaceutical = "FDG"
     rad_info_item.RadionuclideTotalDose = 250.0
     rad_info_item.RadiopharmaceuticalStartTime = injection_time_str
+    rad_info_item.RadiopharmaceuticalStartDateTime = injection_datetime.strftime("%Y%m%d%H%M%S")
     rad_info_item.RadionuclideHalfLife = 6586.2
     rad_info_item.RadiopharmaceuticalVolume = 5.0
     ds.RadiopharmaceuticalInformationSequence = Sequence([rad_info_item])
-
-    try:
-        ds.InjectionDate = injection_date_str
-    except (AttributeError, ValueError):
-        pass
-    try:
-        ds.InjectionTime = injection_time_str
-    except (AttributeError, ValueError):
-        pass
     ds.DecayCorrection = "START"
 
     ds.Manufacturer = "Mock Manufacturer"
@@ -323,27 +315,19 @@ def create_dashboard_demo_tree(
                     item = ds.RadiopharmaceuticalInformationSequence[0]
                     if hasattr(item, "RadiopharmaceuticalStartTime"):
                         del item.RadiopharmaceuticalStartTime
-                if hasattr(ds, "InjectionTime"):
-                    del ds.InjectionTime
-                if hasattr(ds, "InjectionDate"):
-                    del ds.InjectionDate
+                    if hasattr(item, "RadiopharmaceuticalStartDateTime"):
+                        del item.RadiopharmaceuticalStartDateTime
             else:
                 inj_dt = acq_dt - timedelta(minutes=delay_minutes)
                 inj_time_str = inj_dt.strftime("%H%M%S")
-                inj_date_str = inj_dt.strftime("%Y%m%d")
                 if "RadiopharmaceuticalInformationSequence" in ds and len(ds.RadiopharmaceuticalInformationSequence) > 0:
                     item = ds.RadiopharmaceuticalInformationSequence[0]
                     item.RadiopharmaceuticalStartTime = inj_time_str
-                ds.InjectionTime = inj_time_str
-                ds.InjectionDate = inj_date_str
+                    item.RadiopharmaceuticalStartDateTime = inj_dt.strftime("%Y%m%d%H%M%S")
         else:
             # CT should not contain injected radiopharmaceutical context in this demo.
             if hasattr(ds, "RadiopharmaceuticalInformationSequence"):
                 del ds.RadiopharmaceuticalInformationSequence
-            if hasattr(ds, "InjectionTime"):
-                del ds.InjectionTime
-            if hasattr(ds, "InjectionDate"):
-                del ds.InjectionDate
             ds.DecayCorrection = "NONE"
 
         out_path = series_dir / filename

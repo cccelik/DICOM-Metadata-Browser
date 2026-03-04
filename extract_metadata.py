@@ -158,6 +158,18 @@ def safe_getattr(obj, attr: str, cast_type=None):
         return None
 
 
+def _split_dicom_datetime(value: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """Split DICOM DT into (YYYYMMDD, HHMMSS) when possible."""
+    if not value:
+        return None, None
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    if len(digits) < 8:
+        return None, None
+    date_part = digits[:8]
+    time_part = digits[8:14] if len(digits) >= 14 else None
+    return date_part, time_part
+
+
 def _is_printable_ascii(raw: bytes, min_ratio: float = 0.90) -> bool:
     if not raw:
         return False
@@ -502,6 +514,12 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
                 meta.radiopharmaceutical = safe_getattr(item, 'Radiopharmaceutical')
                 meta.injected_activity = safe_getattr(item, 'RadionuclideTotalDose', float)
                 meta.injection_time = safe_getattr(item, 'RadiopharmaceuticalStartTime')
+                start_dt = safe_getattr(item, 'RadiopharmaceuticalStartDateTime')
+                dt_date, dt_time = _split_dicom_datetime(start_dt)
+                if not meta.injection_time and dt_time:
+                    meta.injection_time = dt_time
+                if dt_date:
+                    meta.injection_date = dt_date
                 meta.half_life = safe_getattr(item, 'RadionuclideHalfLife', float)
                 # Additional radiopharmaceutical fields from sequence
                 meta.radiopharmaceutical_volume = safe_getattr(item, 'RadiopharmaceuticalVolume', float)
@@ -512,7 +530,7 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     # Fallback to direct tag access if sequence not available
     meta.radiopharmaceutical = meta.radiopharmaceutical or safe_getattr(ds, 'Radiopharmaceutical')
     meta.injection_time = meta.injection_time or safe_getattr(ds, 'InjectionTime')
-    meta.injection_date = safe_getattr(ds, 'InjectionDate')
+    meta.injection_date = meta.injection_date or safe_getattr(ds, 'InjectionDate')
     meta.half_life = meta.half_life or safe_getattr(ds, 'HalfLife', float)
     meta.decay_correction = safe_getattr(ds, 'DecayCorrection')
 

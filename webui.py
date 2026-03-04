@@ -484,27 +484,29 @@ def _generate_anonymized_value(field_name: str, index: int) -> str:
 
 
 def _anonymize_column(conn: sqlite3.Connection, field_name: str) -> int:
+    # Replace each row independently to avoid deterministic one-to-one mapping
+    # for repeated source values in a single export.
     cursor = conn.execute(
         f"""
-        SELECT DISTINCT "{field_name}"
+        SELECT id
         FROM dicom_metadata
         WHERE "{field_name}" IS NOT NULL
           AND TRIM(CAST("{field_name}" AS TEXT)) != ''
         """
     )
-    values = [row[0] for row in cursor.fetchall()]
-    if not values:
+    row_ids = [int(row[0]) for row in cursor.fetchall()]
+    if not row_ids:
         return 0
 
     replacements = [
-        (_generate_anonymized_value(field_name, idx), original)
-        for idx, original in enumerate(values, start=1)
+        (_generate_anonymized_value(field_name, idx), row_id)
+        for idx, row_id in enumerate(row_ids, start=1)
     ]
     conn.executemany(
-        f'UPDATE dicom_metadata SET "{field_name}" = ? WHERE "{field_name}" = ?',
+        f'UPDATE dicom_metadata SET "{field_name}" = ? WHERE id = ?',
         replacements
     )
-    return len(values)
+    return len(row_ids)
 
 
 @app.route('/databanks/create', methods=['POST'])
