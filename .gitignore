@@ -10,8 +10,15 @@
 !.flake8
 !requirements.txt
 !README.md
+!.github/
+!.github/workflows/
+!.github/workflows/**
 !TUMLogo.svg
 !translations.py
 !templates/
 !templates/**
+!tests/
+!tests/**
 !create_mock_dicom.py
+!Efficient Data Access and Storage Optimization for PET:CT Imaging Data/
+!Efficient Data Access and Storage Optimization for PET:CT Imaging Data/**

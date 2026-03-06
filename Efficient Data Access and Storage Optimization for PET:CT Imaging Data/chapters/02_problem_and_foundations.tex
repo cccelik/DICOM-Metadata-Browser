@@ -1,0 +1,111 @@
+\chapter{Problem Context and Motivation}
+The practical challenge addressed by this work is not the absence of DICOM parsing libraries. Reliable low-level parsers already exist and are widely used. The challenge is that many research workflows still lack a coherent system that integrates ingestion, normalization, quality evaluation, and exploration into a single reproducible process.
+
+Real-world repositories are rarely homogeneous. A single dataset can contain standard \texttt{.dcm} files, \texttt{.ima} variants, uppercase extension variants, extensionless files, and non-DICOM artifacts introduced by archiving or operating-system metadata conversions. Transfer pipelines often package data as ZIP or 7Z archives. Institutional preprocessing can modify temporal fields, and anonymization workflows can preserve visual content while unintentionally introducing metadata inconsistencies. If a pipeline is brittle at discovery time or overly strict at parse time, substantial portions of data can be silently dropped.
+
+The second major problem is that script-based extraction tends to produce static, flat files with limited life-cycle support. If users need new fields, changed filters, additional checks, or updated cohorts, they often rerun the entire process and produce another disconnected export. This fragments data lineage and increases the risk of inconsistent assumptions being mixed across analyses. 
+
+The third problem is methodological. In many projects, metadata completeness and temporal plausibility are evaluated informally and late in the process. By the time inconsistencies are discovered, downstream analyses may already depend on incorrect assumptions. A better workflow surfaces quality signals early and continuously, and it provides traceable links from quality findings to concrete source records.
+
+Taken together, these observations motivate the system goal of this thesis: to create an integrated, local-first metadata platform that can robustly ingest heterogeneous DICOM repositories, preserve rich metadata context, and expose quality information in a reusable and interpretable form.
+
+\section{Research Questions, Objectives, and Scope}
+
+This thesis is structured around four core research questions. It first investigates whether robust, heterogeneous DICOM discovery can be implemented to improve practical recall without introducing unacceptable false positives. It then examines whether metadata-only extraction, combined with local relational storage, provides sufficient performance and stability for responsive, repeatable workflows on realistic local datasets. A third focus concerns the design of a compact yet expressive quality layer capable of identifying actionable metadata issues, particularly in temporal fields. Finally, the thesis evaluates whether these technical capabilities can be integrated into a user-facing interface that reduces reliance on one-off scripts and ad hoc processing.
+
+To address these questions, the project pursued six concrete objectives. The system was designed to support multiple input forms, including directories, nested subdirectories, single files, and compressed archives. It performs broad metadata extraction without loading pixel arrays, while preserving private tags and selected vendor payloads instead of discarding them. Extracted records are persisted in a queryable databank with practical indexing and migration support. The platform further enables interactive search, filtering, and export workflows, and integrates quality analytics directly into the same operational interface used for exploration.
+
+The scope of this work is deliberately bounded. The system is not intended to replace clinical Picture Archiving and Communication System (PACS) infrastructure, nor does it function as a diagnostic decision-support tool. It does not attempt full semantic decoding of all private tags across vendors and software versions, and the current implementation does not include enterprise-grade multi-user access control. Instead, the project establishes a robust local research foundation that can be extended and operationalized in future work.
+
+\section{Technical Background}
+DICOM is a metadata-rich standard in which each data element consists of a tag, a value representation, and an encoded value\cite{dicom}. In repository-level workflows, these elements align naturally with patient-, study-, series-, and instance-level contexts. Physical storage conventions, however, do not always preserve this conceptual hierarchy transparently for analysts. Study- and series-level attributes are frequently repeated across instances, and practical pipelines must transform this raw redundancy into structures that are suitable for querying and cohort-level analysis.
+
+During implementation and debugging, interactive tag-browsing tools can accelerate exploratory inspection of element definitions and common tag names\cite{dicomlookup}. In this work, such utilities serve solely as convenience aids; normative assumptions and design decisions are grounded exclusively in the official DICOM standard\cite{dicom}.
+
+A central technical premise of this thesis is that many metadata workflows do not require pixel data. Pixel arrays dominate file size and I/O cost, whereas fields relevant for cohort filtering, temporal validation, and quality checks reside in metadata headers. Metadata-only extraction, therefore, reduces both runtime and memory footprint without sacrificing analytic utility. This view aligns with the quantitative imaging and AI data-preparation literature, which emphasizes the need for structured metadata curation as a prerequisite for robust downstream analysis\cite{fedorov_qin, DIAZ202125}.
+
+Temporal metadata plays a vital role in PET and nuclear medicine contexts. Injection times, acquisition timestamps, and related date fields are routinely used to derive associated quantities and protocol consistency checks. Even when not directly incorporated into final clinical interpretation, these fields remain essential for workflow validation and reproducibility.
+
+Private tags introduce additional complexity. By design, they are vendor- or pipeline-specific, and their semantics are not uniformly documented. Nevertheless, they often contain reconstruction parameters, provenance details, and processing context that are operationally valuable. A metadata platform oriented toward research should therefore preserve and expose such payloads rather than discarding them prematurely. Imaging informatics literature on ETL-focused pipelines similarly emphasizes the transition from viewer-centric systems to analytics-oriented metadata architectures\cite{software1020009} 
+
+\subsection{Formal Redundancy and Complexity Model}
+
+Let \(N\) denote the number of DICOM instances, \(R\) the number of series, and \(S\) the number of studies, with \(S \le R \le N\). In flat instance-level storage, study- and series-level metadata are duplicated per instance, causing storage for repeated attributes to scale as \(O(N)\). Under hierarchical normalization, these attributes are stored once per logical level, yielding storage complexity \(O(S+R+N_{inst})\), where \(N_{inst}\) represents truly instance-specific fields.
+
+To illustrate this difference quantitatively, consider a single study with 10 series and 500 instances per series (\(N=5000\)). If a study-level block of 1~kB and a series-level block of 0.5~kB are duplicated at the instance level, flat redundancy overhead is approximately
+
+\[
+5000 \cdot (1.0 + 0.5)\,\text{kB} = 7500\,\text{kB}.
+\]
+
+With hierarchical normalization, the same information requires only
+
+\[
+1 \cdot 1.0\,\text{kB} + 10 \cdot 0.5\,\text{kB} = 6.0\,\text{kB}.
+\]
+
+Even before excluding the pixel payloads, this simplified example yields a redundancy ratio of approximately \(7500 / 6 \approx 1250\times\), demonstrating the structural advantage of hierarchy-aware persistence.
+
+For a more concrete work case, assume \(1\) study, \(10\) series, and \(300\) instances per series (\(N=3000\)) with \(40\) repeated attributes per instance. Suppose \(20\) attributes are study-level and \(20\) are series-level, and each stored attribute value (including name, value, and overhead) requires \(32\) bytes. In flat storage, all \(40\) attributes are persisted per instance. In normalized storage, study-level attributes are stored once per study, and series-level attributes are stored once per series.
+
+\begin{table}[htbp]
+\centering
+\caption{Worked numeric redundancy example (flat vs normalized repeated metadata).}
+\label{tab:worked-normalization}
+\begin{tabular}{lrr}
+\toprule
+Quantity & Flat model & Normalized model \\
+\midrule
+Repeated attribute values stored & \(120{,}000\) & \(220\) \\
+Bytes for repeated attributes & \(3{,}840{,}000\) & \(7{,}040\) \\
+Flat/normalized ratio (bytes) & \multicolumn{2}{c}{\(3{,}840{,}000 / 7{,}040 \approx 545\times\)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Related Work and Positioning}
+\subsection{The DICOM Standard and Structured Medical Imaging Data}
+
+The Digital Imaging and Communications in Medicine (DICOM) standard underpins contemporary medical imaging workflows. Beyond defining transport and storage conventions, it specifies a hierarchical information model comprising patient, study, series, and instance entities, along with structured metadata modules and globally unique identifiers \cite{dicom}. Pianykh's practical DICOM guide underscores both the expressive power of this model and the implementation complexity encountered in operational systems \cite{pacs}.
+
+DICOM also supports advanced quantitative objects, including segmentation and structured reporting. Fedorov et al. demonstrate that these capabilities enable standards-compliant quantitative imaging pipelines in PET/CT research \cite{fedorov_qin}. Their work simultaneously highlights the effort required to maintain encoding discipline and validation consistency in real deployments.
+
+While DICOM provides a rich structural foundation, it does not enforce cross-dataset normalization, consistency auditing, or relational abstraction. Clinical systems typically prioritize archival robustness and interoperability. The present thesis addresses the complementary need for a research-oriented relational metadata layer focused on integrity, deduplication, and scalable analysis.
+
+\subsection{Enterprise Imaging Platforms and Research PACS}
+
+Enterprise imaging systems and research PACS platforms illustrate the architectural separation between operational imaging workflows and analytics-oriented processing. REMIX integrates PACS-adjacent services, de-identification modules, and research workflows within a broad institutional stack \cite{erdal_remix}. Orthanc offers a lightweight, vendor-neutral archive with API access and plugin extensibility, suited to research environments \cite{orthanc}.
+
+These platforms provide essential infrastructure for storage and retrieval. However, their primary focus remains interoperability and system integration. They do not inherently provide cross-dataset relational normalization, deduplication-oriented modeling, or systematic temporal anomaly analytics. The system developed in this thesis is therefore positioned as a metadata intelligence layer operating above or alongside archival infrastructure rather than as a replacement for PACS or VNA systems.
+
+\subsection{Metadata Quality Assurance and Protocol Compliance}
+
+Metadata integrity is central to quantitative imaging workflows, particularly in nuclear medicine. Q-Bot demonstrates that automated DICOM metadata monitoring can detect protocol non-compliance and field inconsistencies in routine practice \cite{nagy_qbot}. This confirms that proactive metadata QA has operational value beyond retrospective auditing.
+
+Tsave et al. propose a multi-dimensional data-quality framework encompassing completeness, validity, consistency, integrity, and fairness \cite{cancers17193213}. Their framework reinforces the premise that data quality must be systematically assessed prior to AI modeling or statistical analysis.
+
+Building on these perspectives, the present thesis integrates QA computation directly into the ingestion and exploration workflow. Deduplication-aware storage, temporal anomaly detection, and private-tag visibility are treated as first-class components of routine metadata processing rather than auxiliary steps.
+
+\subsection{Privacy, De-Identification, and Re-Identification Risks}
+
+The reuse of imaging data for research requires robust de-identification, yet both metadata and pixel-level channels remain potential vectors for re-identification. The Medical Image De-Identification Benchmark Challenge illustrates the technical difficulty of achieving reliable anonymization at scale \cite{pei2025medicalimagedeidentificationbenchmark}. Complementary evidence from the New England Journal of Medicine demonstrates that facial reconstruction from cranial MRI can enable re-identification against public photographs \cite{anonrisk}.
+
+This thesis does not claim full pixel-level anonymization. Instead, it strengthens metadata-side transparency and integrity checking by preserving private-tag evidence, exposing temporal inconsistencies, and enabling auditable review before downstream analysis.
+
+\subsection{AI Data Preparation and ETL Pipelines}
+
+AI-driven imaging research depends on structured preparation pipelines extending beyond archival storage. Diaz et al. describe a lifecycle that spans acquisition, de-identification, curation, storage, and annotation \cite{DIAZ202125}. Their analysis underscores that raw repositories rarely meet analysis-ready standards without deliberate transformation and validation.
+
+Similarly, PDCP demonstrates an ETL-oriented pipeline for extracting research datasets from Orthanc-based environments \cite{software1020009}. These works reinforce the need for transformation layers above PACS APIs. The system presented here aligns with this principle, focusing specifically on metadata normalization and consistency-aware relational modeling for scalable cohort analysis.
+
+\subsection{Quantitative PET/CT and Standardization}
+
+Quantitative PET practice depends on strict protocol adherence and timing accuracy. The EANM FDG PET/CT guideline emphasizes harmonization requirements for reliable standardized uptake value (SUV) interpretation \cite{suv}. From a system perspective, temporal metadata fields, therefore, constitute core quality variables rather than peripheral annotations.
+
+The temporal anomalies identified in the evaluated PET/CT subsets in this thesis empirically reinforce this point: without systematic metadata validation, quantitative conclusions may be compromised by hidden protocol inconsistencies.
+
+\subsection{Relational Modeling and Data Independence}
+
+The theoretical foundation for normalization follows Codd's relational model, which formalized data independence and redundancy control for shared data systems \cite{codd}. Codd argued that the logical structure should insulate users from the complexity of physical storage while supporting consistency-preserving operations.
+
+Applied to DICOM repositories, this principle entails translating hierarchical five-level metadata into a normalized relational representation that reduces duplication and improves query reliability across cohorts. The contribution of this thesis lies in synthesizing DICOM-aware extraction with relational data-engineering principles for metadata-centric imaging research.

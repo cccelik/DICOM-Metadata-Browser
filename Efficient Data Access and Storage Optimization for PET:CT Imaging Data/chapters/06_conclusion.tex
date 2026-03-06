@@ -1,0 +1,11 @@
+\chapter{Conclusion}
+This thesis presented a complete DICOM Metadata Browser that addresses practical metadata workflow challenges through robust ingestion, metadata-focused extraction, compact persistence, and integrated quality analytics. The system was designed for local deployability, reproducibility, and maintainability, and it was evaluated empirically on multiple datasets.
+
+The results show that the platform provides operationally useful runtimes, substantial storage reduction, and meaningful quality signals. More importantly, it demonstrates that early integrated QA and persistent databanks improve workflow governance compared with repeated script-specific exports. This shift improves both technical workflow stability and methodological rigor.
+
+The thesis therefore proves that a local-first, metadata-centered architecture can remain both computationally efficient and methodologically robust under heterogeneous repository conditions. It demonstrates in practice that robust discovery, hierarchical normalization, and integrated temporal QA can be combined into a single coherent system without enterprise-scale infrastructure. Beyond the specific datasets evaluated, this matters because the same design pattern can be applied to other imaging cohorts where reproducibility, metadata integrity, and low-friction, iterative analysis are central requirements.
+
+\section{Future Work}
+Future development should prioritize three directions. First, testing and reproducibility should be strengthened through broader automated coverage and structured run manifests. Second, quality logic should become profile-driven so that different protocols can define explicit completeness and plausibility expectations. Third, semantic enrichment for private tags should be expanded through vendor-specific plugin mechanisms.
+
+If deployment requirements grow, the architecture can evolve incrementally by introducing full-text indexing, background ingestion queues, and alternative storage backends while preserving existing module boundaries.

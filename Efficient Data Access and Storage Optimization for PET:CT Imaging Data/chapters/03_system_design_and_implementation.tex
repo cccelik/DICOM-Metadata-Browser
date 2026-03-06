@@ -1,0 +1,271 @@
+\chapter{System Design and Requirements}
+
+Requirements were derived from iterative interaction with real repository structures. Functional requirements include robust candidate detection, metadata extraction across major tag categories, preservation of private payload, deduplication behavior suitable for reruns, and interactive user workflows for search, filtering, and export.
+
+Non-functional requirements include local deployability, bounded resource use, resilience to imperfect inputs, and maintainability of code structure. Reliability requirements emphasize graceful degradation: unreadable files should be skipped and reported rather than causing a full run failure.
+
+The design principles that emerge from these requirements are consistency, traceability, and interpretability. Consistency requires shared discovery and parsing logic across all tools. Traceability preserves a clear path from aggregated metrics back to the underlying source records. Interpretability ensures that quality signals remain grounded in explicit metadata fields rather than opaque black-box outputs.
+
+\section{Architecture Overview}
+
+The system is structured as a layered pipeline with explicit stage boundaries. Discovery identifies candidate paths. Extraction converts each candidate into a structured metadata record. Storage persists these records in SQLite with indexing and deduplication constraints. A representative-series step then marks one series per study for stable study-level aggregation. Finally, the web layer exposes the databank through a Flask-based interface for browsing, QA, and export.
+
+This separation offers practical benefits: each stage can be verified independently, failure models remain localized, and bottlenecks are easier to attribute. It also enables incremental evolution without destabilizing the whole pipeline. For example, search ranking can be refined in the web layer without touching extraction, and private-tag classification can be extended without changing discovery.
+
+From a software-architecture perspective, the design improves cohesion while controlling coupling. Each stage has a single dominant responsibility (candidate selection, extraction, persistence, aggregation, or presentation), which increases intra-module cohesion. Interfaces between stages are intentionally narrow, primarily typed metadata records and stable identifiers, reducing inter-module coupling and lowering regression risk during feature extension.
+
+The architecture also constrains the growth of complexity in routine runs. Processing \(N\) files incurs approximately linear discovery, extraction, and insertion effort \(O(N)\). Representative marking is driven by series grouping and remains linear in the number of observed series. By avoiding nested cross-layer control flow, the pipeline prevents superlinear behavior that would otherwise emerge from repeated rescans and cross-stage feedback loops. 
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  >=Stealth,
+  font=\small,
+  node distance=12mm
+]
+
+\tikzset{
+  box/.style={
+    draw,
+    rounded corners,
+    align=center,
+    minimum height=9mm,
+    minimum width=32mm,
+    inner xsep=5pt,
+    inner ysep=3pt,
+    fill=TUMAccentLightBlue!30
+  }
+}
+
+\node[box] (in) {Input Sources\\(folders / files / archives)};
+\node[box, right=of in] (disc) {Discovery\\candidate filtering};
+\node[box, right=of disc] (ext) {Extraction\\metadata + private tags};
+\node[box, right=of ext] (db) {Storage\\SQLite databank};
+\node[box, right=of db] (ui) {Web Layer\\index / detail / dashboard / export};
+
+\draw[->, thick] (in) -- (disc);
+\draw[->, thick] (disc) -- (ext);
+\draw[->, thick] (ext) -- (db);
+\draw[->, thick] (db) -- (ui);
+
+\node at ($(in.north)!0.5!(ui.north)+(0,7mm)$) {\small Core Processing Pipeline};
+
+\end{tikzpicture}%
+}
+
+\caption{End-to-end processing flow from heterogeneous inputs to interactive QA and export.}
+\label{fig:architecture-flow}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=stealth, font=\small]
+\tikzstyle{tbl}=[draw, rounded corners, align=left, minimum width=43mm, minimum height=11mm]
+\node[tbl, fill=TUMAccentGreen!20] (study) at (0,0) {\textbf{Study}\\study\_instance\_uid (PK)\\study-level attributes};
+\node[tbl, fill=TUMAccentGreen!20] (series) at (0,-2.2) {\textbf{Series}\\series\_instance\_uid (PK)\\study\_instance\_uid (FK)};
+\node[tbl, fill=TUMAccentGreen!20] (inst) at (0,-4.4) {\textbf{Instance/Metadata}\\sop\_instance\_uid\\series\_instance\_uid (FK)};
+\node[tbl, fill=TUMAccentOrange!20] (priv) at (7.2,-2.2) {\textbf{Private Tags}\\series\_instance\_uid (FK)\\creator, tag, value, class};
+\draw[->, thick] (study) -- (series);
+\draw[->, thick] (series) -- (inst);
+\draw[->, thick] (series) -- (priv);
+\end{tikzpicture}
+\caption{Normalized hierarchy sketch used by the databank model. Repeated study/series fields are stored once per hierarchy level instead of once per instance.}
+\label{fig:normalized-schema-sketch}
+\end{figure}
+
+\section{Input Handling and Orchestration}
+The orchestration layer accepts heterogeneous inputs. Directories can be processed recursively or treated as separate scan roots depending on flags. For single files, candidate checks are applied immediately. Archives are extracted to a temporary location before processing, after which the extracted content is handled identically to normal folder inputs.
+
+This design reflects common data-delivery practice. Research datasets frequently arrive as compressed bundles with mixed internal structure; integrating archive handling into the pipeline eliminates manual preprocessing steps and reduces user error.
+
+\section{Discovery Layer}
+Discovery applies a staged acceptance policy. Files with known DICOM extensions are accepted directly. Files containing the standard DICOM file header marker ("DICM") are also accepted even when no recognized extension is present. For remaining extensionless files, the system attempts a parser-based fallback to determine whether the file contains valid DICOM metadata. This layered approach balances practical recall and precision when scanning heterogeneous repositories.
+
+Artifact filtering is treated as a first-class responsibility of discovery. Common non-data files (e.g., macOS metadata), archive side structures, and symlink edge cases are excluded to reduce false candidates and avoid unnecessary parser load. The same discovery logic is shared across all processing scripts to ensure consistent file coverage.
+
+\section{Extraction Layer}
+Extraction performs metadata-only reads to minimize resource overhead. The field model spans patient-, study-, and series-level attributes as well as manufacturer, acquisition, nuclear medicine, and image descriptors. Conversion helpers normalize common DICOM value types and tolerate malformed optional fields without aborting a full run.
+
+Private-tag extraction is implemented as a parallel path within the same layer. Creator mappings are resolved per dataset, values are decoded conservatively, and value fingerprints are generated for stable tracking. For Siemens Common Syngo Architecture (CSA) payloads, parsing attempts yield structured JSON when feasible and always retain a hash for consistency checks.
+
+\section{Storage Layer}
+The storage layer uses SQLite with pragmas and indexes tuned for local analytics. The main table focuses on operational metadata required for browsing and quality logic. High-cardinality private-tag payloads are stored in a dedicated table with uniqueness constraints to prevent repeated duplicates for identical values.
+
+Schema migration is handled during initialization. When older databanks are opened after schema evolution, missing columns are automatically added. This supports iterative development without requiring frequent databank resets.
+
+
+\section{Representative-Series Layer}
+Many studies contain multiple series with overlapping metadata. If all series contribute equally to study-level analytics, dashboards can be biased by overcounting. The representative-series layer, therefore, selects one series per study using a metadata-richness score, prioritizing fields required for uptake-delay and dose checks.
+
+This yields a stable aggregation basis for summaries and QA views, while preserving complete series-level information for drill-down inspection.
+
+\section{Web and Interaction Layer}
+The web layer provides study listings, detail views, quality dashboards, and export workflows. Search combines SQL-based retrieval with post-retrieval ranking. Filters support modality, manufacturer, radiopharmaceutical context, and range-based constraints. Export produces grouped field sets and derived values for downstream analysis.
+
+The interaction model supports iterative use: ingest data, inspect quality, refine filters, and export subsets without leaving the same environment.
+
+\section{Detailed Implementation}
+The implementation is organized around five primary modules. \texttt{dicom\_discovery.py} implements shared candidate logic. \texttt{extract\_metadata.py} defines field extraction, private-tag handling, and parallel extraction APIs. \texttt{store\_metadata.py} provides schema definitions, migrations, and insertion logic. \texttt{process\_dicom.py} orchestrates full runs including archive handling and representative marking. \texttt{webui.py} implements user-facing routes and query logic.
+
+Implementation quality is supported through explicit function boundaries, centralized helper utilities, and defensive handling of common failure modes. The codebase favors clear defaults and robust parsing over assumptions about repository cleanliness.
+
+\subsection{Script Responsibility Matrix}
+Because this thesis is evaluated as a software systems project, script-level responsibility is explicitly documented. Table~\ref{tab:script-matrix} summarizes the purpose of each major script and its role in the end-to-end workflow.
+
+\begin{table}[htbp]
+\centering
+\caption{Major project scripts and their functional purpose.}
+\label{tab:script-matrix}
+\small
+\begin{tabular}{p{0.24\textwidth}p{0.30\textwidth}p{0.38\textwidth}}
+\toprule
+Script & Purpose & Workflow Role \\
+\midrule
+\texttt{dicom\_discovery} & Candidate detection and artifact filtering for heterogeneous file trees. & Shared discovery primitive used by ingestion utilities to ensure consistent file coverage. \\
+\texttt{extract\_metadata} & Metadata-only parsing, private-tag extraction, and parallel extraction API. & Core extraction engine used for performance and quality evaluation. \\
+\texttt{store\_metadata} & SQLite schema initialization, migration handling, insertion, and dedup constraints. & Persistence layer implementing normalized storage and rerun safety. \\
+\texttt{process\_dicom} & End-to-end orchestration (discovery, extraction, insertion, representative marking, archive handling). & Main benchmarked processing entry point in Chapter 4. \\
+\makecell[l]{\texttt{extract\_one\_}\\\texttt{per\_series}} & One-instance-per-series subset construction. & Preprocessing utility for filtered-size and raw-vs-filtered benchmark comparisons. \\
+\texttt{webui} & Flask application for index/detail/dashboard/export and interactive QA drill-down. & User-facing system component evaluated through workflow screenshots and feature coverage. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This decomposition makes the artifact auditable at code level: each script has a narrow, testable responsibility and can be assessed independently for correctness, performance implications, and contribution to the overall system.
+
+\FloatBarrier
+\section{Parallelism and Performance Choices}
+Parallel extraction uses process-based workers to avoid interpreter-level contention in CPU-bound and I/O-mixed parsing. The worker auto-tunes the samples extraction throughput at startup and selects a practical worker count for the current machine.
+
+Insertion is performed in batch transactions, reducing commit overhead relative to per-file commits. Since measured runs consistently showed extraction dominating insertion, this combination produced a favorable overall profile.
+
+\subsection{Worker Execution Model and Controls}
+Worker parallelism is implemented in \texttt{extract\_metadata.py} using a process pool. Each worker extracts metadata from a subset of candidate files and returns normalized records to the main process for insertion. Parsing, therefore, remains parallel while SQLite access follows a single-writer path.
+
+In default operation (\texttt{process\_dicom.py} without explicit worker flags), auto-worker tuning is enabled. A bounded candidate sample is processed with several worker-count options (e.g., 1, 2, 4, 8, 16, up to practical CPU/file limits), and the fastest configuration is selected for the full run. This reduces machine-specific guesswork and adapts to local I/O and CPU behavior.
+
+Manual controls are available when deterministic execution is required. \texttt{--max-workers N} forces a fixed worker count. \texttt{--no-auto-workers} turns off startup tuning and falls back to defaults, where file count and a practical upper cap bound the worker count. For benchmarking, fixed worker counts are preferred to avoid run-to-run variance introduced by tuning samples.
+
+Operationally, throughput increases until parsing saturates storage bandwidth or CPU capacity. Beyond that point, additional workers can increase overhead through scheduling and memory pressure without reducing wall time. The implementation, therefore, treats worker count as a tunable system parameter rather than a fixed constant.
+
+\section{Deduplication and Incremental Processing}
+The system supports safe reruns through deduplication and optional path-based skipping. Series-level uniqueness constraints prevent duplicate inflation across repeated processing, while existing-path filtering can skip already-ingested paths when updates are incremental.
+
+This behavior is important for long-lived repositories where new scans arrive periodically, and full reprocessing is unnecessary.
+
+Rerun safety relies on explicit operational assumptions. The current implementation assumes single-writer processing per databank during a run and uses SQLite transactional semantics with uniqueness constraints to guarantee idempotent insertion. Under these assumptions, repeated execution with unchanged inputs converges to a stable databank state rather than accumulating duplicates.
+
+\section{Quality Logic in Code}
+Quality computations are intentionally simple and traceable. Delay calculations rely on parsed date and time fields with explicit fallback behavior. Dose-per-kilogram is derived from the injected activity and the available weight. Representative-series scoring combines these computability checks with modality context.
+
+This avoids opaque composite scores and keeps troubleshooting grounded in directly inspectable metadata.
+\section{Comprehensive Functionality Coverage}
+This section documents the scope of implemented functionality to ensure feature coverage remains explicit and auditable. The system is not only a parser, but a complete local workflow environment spanning ingestion, persistence, exploration, quality assurance, and export.
+
+\subsection{Pipeline and Storage Functions}
+\paragraph{Ingestion and Discovery Functions}
+The processing entry points support directories, single files, and compressed archives. Archive ingestion handles ZIP and 7Z packaging, extracts to temporary locations, and processes extracted content with the same discovery logic used for normal folders. Discovery includes extension-based acceptance, signature-aware detection, and parse fallback for extensionless files, while filtering known non-DICOM artifacts. Processing can run recursively by subdirectory or in single-root mode (\texttt{--no-subdirs}), enabling both cohort-level and flat-folder usage patterns.
+
+\paragraph{Extraction and Metadata Functions}
+Metadata extraction avoids pixel loading and covers patient, study, series, manufacturer, acquisition, nuclear medicine, and image-geometry attributes. Robust conversion helpers prevent run-level failures when encountering malformed optional fields. Nuclear medicine support includes injection/acquisition timing interpretation, uptake-delay derivation, and dose-per-kg derivation from injected activity and weight context. Private-tag handling includes creator-aware extraction, conservative value decoding, classification heuristics, and persistent storage of decoded values and fingerprints. Siemens CSA handling includes structured JSON capture and hash tracking for consistency checks.
+
+\paragraph{Storage, Migration, and Rerun Safety Functions}
+The databank layer uses SQLite with indexing optimized for search and filtering. The schema includes core metadata and a dedicated private-tag table. Additive migration logic updates older databanks by adding missing columns at initialization time. Rerun safety is implemented via deduplication constraints and optional path-based skipping (\texttt{--skip-existing-paths}) for incremental updates. Representative-series marking is executed after ingestion to stabilize study-level aggregation and reduce overcount bias in QA views.
+
+\paragraph{Processing Control and Performance Functions}
+Operational controls include worker parallelism with auto-tuning, manual worker limits (\texttt{--max-workers}), optional auto-worker disablement (\texttt{--no-auto-workers}), verbose progress output, and timing summaries (\texttt{--timing}) that separate extraction and insertion phases. These controls support both reproducible benchmarking and day-to-day processing.
+
+\subsection{Interface, QA, and Export Functions}
+\paragraph{Web Interface Functions}
+The web application provides databank-aware navigation and switching, study index browsing, and full study detail inspection. Search combines SQL retrieval with ranking refinement. Filtering supports modality, manufacturer, and radiopharmaceutical categories, numeric range constraints for uptake and dose, and QA-driven filters for missingness, timing anomalies, dose plausibility issues, composition checks, and QA score thresholds. Study detail views expose expandable per-series metadata blocks, nuclear medicine details, private-tag provenance, and CSA summaries for forensic inspection.
+
+\paragraph{Dashboard and QA Analytics Functions}
+The dashboard provides protocol adherence and QA analytics for representative series. Views include completeness checks, timing-integrity checks, dose-plausibility checks, scanner-landscape summaries, protocol--radiopharmaceutical summaries, derived-object indicators, duplicate/collision indicators, study-composition checks, and QA score distributions. Drill-down links map dashboard findings back to index filters, keeping anomaly detection and root-cause inspection connected within a single workflow.
+
+\paragraph{Export, Administrative, and API Functions}
+Study-level CSV export supports selectable field sets, grouped export modes, section-based output structure, modality restrictions, and derived fields. Formatting standardizes dates, times, numeric units, and computed fields to reduce downstream cleanup in analysis notebooks. Administrative actions include databank creation, upload-based ingestion from the UI, and controlled study deletion from the databank. An API endpoint for series-level retrieval supports programmatic access for integration and debugging.
+
+\subsection{Validation and Demonstration Tooling}
+The project also includes synthetic data tooling for reproducible demonstrations. Mock generation supports single-file output, structured tree generation, and dashboard-focused cohorts with controlled variation across patient naming, modality, manufacturer, radiopharmaceutical context, delay anomalies, dose-per-kg spread, and missing-value scenarios. This supports repeatable UI demonstrations, regression testing of filters and QA logic, and the generation of thesis-ready figures.
+
+\section{Data Model and Query Design}
+
+The storage model is pragmatic and optimized for local analytics. It preserves enough structure for meaningful filtering and aggregation while avoiding excessive schema fragmentation. Study and series identifiers provide robust grouping behavior, and indexed columns support common UI and export query paths.
+
+Private payload data is separated into its own table to keep the main table focused and performant. This also improves interpretability: users can inspect private data explicitly when needed without burdening standard queries.
+
+Query design follows two stages. First, SQL retrieves candidates using indexed filters and case-insensitive matching. Second, application-level ranking refines ordering for fuzzy search. This keeps infrastructure simple while improving user-perceived relevance.
+
+\section{User Workflow and Interface Design}
+The interface reflects the workflow users typically follow. Sessions begin with broad study exploration, transition to targeted filtering, and end with either record-level inspection or export for external analysis. The dashboard supports this loop as an integrated triage surface rather than a disconnected reporting tool.
+
+A key design principle is progressive detail. High-level pages prioritize compact representative information, while detail pages expose deeper context for individual records. This helps users detect anomalies quickly without being overwhelmed at the start.
+
+The export subsystem emphasizes interoperability. Users can select meaningful field groups and include derived values commonly required in analysis notebooks, reducing repetitive postprocessing outside the system.
+
+\section{Visual Interface Walkthrough}
+To document the concrete interaction surface of the implemented system, this section provides desktop screenshots captured from the \texttt{mock\_dashboard\_demo.db} databank. The index page is the operational entry point for most sessions and supports both broad cohort browsing and targeted subset isolation.
+
+\begin{figure}[H]
+\centering
+\subfloat[Index overview with global search, filter toggle, and card-based study list.\label{fig:ui-index-overview}]{
+  \includegraphics[width=0.62\textwidth]{screenshots/ui_index_overview}
+}
+
+\subfloat[Filtered index view with active modality, manufacturer, radiopharmaceutical, and numeric range constraints.\label{fig:ui-index-filtered}]{
+  \includegraphics[width=0.62\textwidth]{screenshots/ui_index_filtered}
+}
+\caption{Index-page workflow views.}
+\label{fig:ui-index-paired}
+\end{figure}
+
+The dashboard is used for rapid triage immediately after ingestion. It combines adherence metrics, distribution charts, and QA drill-down links that map directly back to filtered index subsets.
+The dashboard is used for rapid triage immediately after ingestion. It combines adherence metrics, distribution charts, and QA drill-down links that map directly back to filtered index subsets.
+
+\begin{figure}[htbp]
+\centering
+\subfloat[Dashboard overview with protocol-adherence bars and delay/dose distribution summaries.\label{fig:ui-dashboard-overview}]{
+\includegraphics[width=0.65\textwidth]{screenshots/ui_dashboard_overview}
+}
+\vspace{0.2em}
+\subfloat[Dashboard QA section showing metadata-completeness bars and per-field missingness drill-down actions.\label{fig:ui-dashboard-qa}]{
+\includegraphics[width=0.65\textwidth]{screenshots/ui_dashboard_qa}
+}
+\caption{Dashboard workflow views.}
+\label{fig:ui-dashboard-paired}
+\end{figure}
+
+The study detail view supports record-level validation. It exposes full series metadata, expandable per-series panels, private-tag context, and export controls for downstream analysis notebooks and quality reports.
+
+\begin{figure}[p]
+\centering
+\subfloat[Study detail overview with header actions and patient/study metadata tables.\label{fig:ui-study-detail-overview}]{%
+\includegraphics[width=0.94\textwidth]{screenshots/ui_study_detail_overview}
+}
+\vspace{0.1em}
+\subfloat[Expanded study-detail view showing the series table with one row opened for inline details.\label{fig:ui-study-detail-expanded}]{%
+\includegraphics[width=0.94\textwidth]{screenshots/ui_study_detail_expanded}
+}
+\caption{Study-detail workflow views.}
+\label{fig:ui-study-detail-paired}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\subfloat[Series details panel showing Nuclear Medicine fields, derived activity values, and technical series attributes.\label{fig:ui-series-details-panel}]{
+\includegraphics[width=0.80\textwidth]{screenshots/ui_series_details_panel}
+}
+\vspace{0.2em}
+\subfloat[Export modal with section-based field selection, grouping controls, and CSV download action.\label{fig:ui-study-export-modal}]{
+\includegraphics[width=0.88\textwidth]{screenshots/ui_study_export_modal}
+}
+\caption{Series inspection and export workflow views.}
+\label{fig:ui-series-export-paired}
+\end{figure}
+
+Absolute local file paths shown in study-level views are intentionally redacted in the figures to protect personal information and local workstation details, while preserving the structure and interpretation of the interface elements.
+
+Several interaction capabilities are described in the report, even when not foregrounded in a specific screenshot. These include databank switching from the top navigation, language switching (German and English), databank creation and upload ingestion, direct study deletion, CSV export grouped by modality or section, and dashboard-to-index drill-down links for missingness, timing, dose plausibility, study composition, and QA score buckets. Together, these functions support a closed loop in which users ingest data, identify anomalies, inspect causal metadata at series level, and export reproducible subsets for external analysis.
+
+\clearpage

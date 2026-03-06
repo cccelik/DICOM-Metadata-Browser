@@ -1,0 +1,22 @@
+\makeatletter
+\ifthenelse{\pdf@strcmp{\languagename}{english}=0}
+{\addcontentsline{toc}{chapter}{Acknowledgments}}
+{\addcontentsline{toc}{chapter}{Danksagungen}}
+\makeatother
+\thispagestyle{empty}
+
+\vspace*{20mm}
+
+\begin{center}
+\makeatletter
+\ifthenelse{\pdf@strcmp{\languagename}{english}=0}
+{\usekomafont{section} Acknowledgments}
+{\usekomafont{section} Danksagungen}
+\makeatother
+\end{center}
+
+\vspace{10mm}
+
+I would like to thank Prof. Dr. Julia Schnabel and the chair of Computational Imaging and AI in Medicine for providing the academic framework and institutional setting in which this thesis was conducted. The research environment, with its emphasis on methodological rigor and reproducibility, shaped the broader context of this work. I am particularly grateful to Prof. Dr. Stephan Nekolla for supporting the practical application context of this project within PET/CT imaging research and enabling access to relevant datasets. His perspective on clinical workflows and the relevance of metadata helped ground the system design decisions in real-world imaging practice. Finally, I would like to express my sincere gratitude to my family and friends for their continuous support, patience, and encouragement through my studies. Their trust and motivation made it possible to complete this thesis with focus and determination
+
+\cleardoublepage{}

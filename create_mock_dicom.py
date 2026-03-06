@@ -8,7 +8,6 @@ Modes:
 """
 
 import argparse
-import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
@@ -87,7 +86,6 @@ def _build_mock_dataset(
 
     injection_datetime = acquisition_datetime - timedelta(hours=1)
     injection_time_str = injection_datetime.strftime("%H%M%S")
-    injection_date_str = injection_datetime.strftime("%Y%m%d")
 
     rad_info_item = DSDataset()
     rad_info_item.Radiopharmaceutical = "FDG"

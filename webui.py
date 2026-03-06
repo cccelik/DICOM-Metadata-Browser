@@ -253,6 +253,9 @@ ANONYMIZE_FIELDS = [
     {"name": "patient_name", "label_key": "patient_name", "default": True},
     {"name": "patient_id", "label_key": "patient_id", "default": True},
     {"name": "patient_birth_date", "label_key": "patient_birth_date"},
+    {"name": "study_description", "label_key": "study_description", "default": True},
+    {"name": "series_description", "label_key": "description", "default": True},
+    {"name": "protocol_name", "label_key": "protocol_name", "default": True},
     {"name": "study_id", "label_key": "study_id"},
     {"name": "accession_number", "label_key": "accession_number"},
     {"name": "referring_physician_name", "label_key": "referring_physician"},
@@ -260,12 +263,21 @@ ANONYMIZE_FIELDS = [
     {"name": "institution_address", "label_key": "institution_address"},
     {"name": "ctp_subject_id", "label_key": "ctp_subject_id"},
     {"name": "ctp_collection", "label_key": "ctp_collection"},
-    {"name": "file_path", "label_key": "file_path"},
+    {"name": "csa_image_header_json", "label_key": "csa_image_header_json", "default": True},
+    {"name": "csa_series_header_json", "label_key": "csa_series_header_json", "default": True},
+    {"name": "file_path", "label_key": "file_path", "default": True},
 ]
 
 ANONYMIZE_FIELD_ORDER = [field["name"] for field in ANONYMIZE_FIELDS]
 ANONYMIZE_DEFAULT_FIELDS = [field["name"] for field in ANONYMIZE_FIELDS if field.get("default")]
 
+ANONYMIZE_BLANK_FIELDS = {
+    "study_description",
+    "series_description",
+    "protocol_name",
+    "csa_image_header_json",
+    "csa_series_header_json",
+}
 
 def ensure_databank_dir() -> None:
     DATABANK_DIR.mkdir(parents=True, exist_ok=True)
@@ -509,6 +521,59 @@ def _anonymize_column(conn: sqlite3.Connection, field_name: str) -> int:
     return len(row_ids)
 
 
+def _blank_column(conn: sqlite3.Connection, field_name: str) -> int:
+    cursor = conn.execute(
+        f"""
+        UPDATE dicom_metadata
+        SET "{field_name}" = NULL
+        WHERE "{field_name}" IS NOT NULL
+          AND TRIM(CAST("{field_name}" AS TEXT)) != ''
+        """
+    )
+    return int(cursor.rowcount or 0)
+
+
+def _anonymize_private_tag_file_path(conn: sqlite3.Connection) -> int:
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='private_tag'")
+    if cursor.fetchone() is None:
+        return 0
+    update_cursor = conn.execute(
+        """
+        UPDATE private_tag
+        SET file_path = NULL
+        WHERE file_path IS NOT NULL
+          AND TRIM(CAST(file_path AS TEXT)) != ''
+        """
+    )
+    return int(update_cursor.rowcount or 0)
+
+
+def _scrub_all_private_tag_payloads(conn: sqlite3.Connection) -> int:
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='private_tag'")
+    if cursor.fetchone() is None:
+        return 0
+    scrub_cursor = conn.execute(
+        """
+        UPDATE private_tag
+        SET value_text = NULL,
+            value_num = NULL,
+            value_json = NULL,
+            value_hex = NULL,
+            byte_len = NULL,
+            value_hash = NULL,
+            file_path = NULL
+        WHERE value_text IS NOT NULL
+           OR value_num IS NOT NULL
+           OR value_json IS NOT NULL
+           OR value_hex IS NOT NULL
+           OR byte_len IS NOT NULL
+           OR value_hash IS NOT NULL
+           OR file_path IS NOT NULL
+        """
+    )
+    return int(scrub_cursor.rowcount or 0)
+
+
 @app.route('/databanks/create', methods=['POST'])
 def create_databank():
     db_name = normalize_db_name(request.form.get('name'))
@@ -533,9 +598,9 @@ def export_anonymized_databank():
         return f"Database not found: {db_path}", 404
 
     requested_fields = request.args.getlist("fields")
-    selected_fields = [name for name in ANONYMIZE_FIELD_ORDER if name in requested_fields]
-    if not selected_fields:
-        selected_fields = list(ANONYMIZE_DEFAULT_FIELDS)
+    requested_set = {name for name in requested_fields if name in ANONYMIZE_FIELD_ORDER}
+    selected_set = set(ANONYMIZE_DEFAULT_FIELDS) | requested_set
+    selected_fields = [name for name in ANONYMIZE_FIELD_ORDER if name in selected_set]
 
     fd, temp_path = tempfile.mkstemp(prefix="anonymized_", suffix=".db")
     os.close(fd)
@@ -544,12 +609,28 @@ def export_anonymized_databank():
     conn = None
     try:
         conn = sqlite3.connect(temp_path)
+        # Use rollback journal to avoid WAL sidecars in exported anonymized DB.
+        conn.execute("PRAGMA journal_mode=DELETE")
+        # Ensure deleted/updated bytes are actively zeroed before final rewrite.
+        conn.execute("PRAGMA secure_delete=ON")
         cursor = conn.execute("PRAGMA table_info(dicom_metadata)")
         existing_columns: Set[str] = {str(row[1]) for row in cursor.fetchall()}
         applicable_fields = [field for field in selected_fields if field in existing_columns]
         for field_name in applicable_fields:
-            _anonymize_column(conn, field_name)
+            if field_name in ANONYMIZE_BLANK_FIELDS:
+                _blank_column(conn, field_name)
+            else:
+                _anonymize_column(conn, field_name)
+        if "file_path" in applicable_fields:
+            # Absolute path in UI is reconstructed from scan_root + file_path.
+            # Scrub both sources so enabling file-path anonymization cannot leak names.
+            if "scan_root" in existing_columns:
+                _blank_column(conn, "scan_root")
+            _anonymize_private_tag_file_path(conn)
+        _scrub_all_private_tag_payloads(conn)
         conn.commit()
+        # Repack database so old text is not recoverable via raw-page scanning tools.
+        conn.execute("VACUUM")
     except Exception as exc:
         if conn is not None:
             conn.close()

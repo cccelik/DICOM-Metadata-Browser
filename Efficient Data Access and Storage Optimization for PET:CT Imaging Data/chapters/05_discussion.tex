@@ -1,0 +1,157 @@
+\chapter{Discussion}
+The project outcomes support the thesis that metadata workflows benefit from integrated system design. The implementation demonstrates that local-first architecture can deliver robust ingestion, persistent exploration, and quality-aware analysis support without high operational overhead.
+
+Several trade-offs are explicit. SQLite is highly effective at current scale and simplicity requirements, but larger multi-user settings may eventually require a different backend. Private-tag classification heuristics are useful for operational triage but not a substitute for complete vendor semantic models. Quality thresholds used in delay plausibility checks are practical defaults and should be adapted to the protocol context in future work.
+
+This interpretation aligns with broader data-quality and radiomics workflow literature, which treats metadata quality as a multi-dimensional concern spanning completeness, consistency, temporal validity, and semantic harmonization rather than a single scalar score \cite{cancers17193213,erdal_remix}.
+
+From an engineering perspective, the strongest design decision was to consolidate all workflow stages into a single artifact. This reduced duplicated logic and supported reproducible iteration while moving quality checks earlier in the workflow.
+
+\section{Threats to Validity}
+Environment-specific benchmarking conditions influence internal validity. Runtime values depend on hardware, storage behavior, and background system load. To reduce this risk, measurements were collected with consistent command patterns and interpreted comparatively rather than as universal constants.
+
+External validity is limited by the diversity of the dataset. Although the evaluated sets differ in size and metadata characteristics, they do not represent all modalities, vendor combinations, or institutional preprocessing pipelines.
+
+Proxy metrics limit construct validity. Field presence is a practical indicator of completeness but not a full guarantee of semantic correctness. Delay anomaly counts are useful signals but not definitive proof of error without domain-specific review.
+An additional construct validity risk is that preprocessing performed by external de-identification pipelines may alter temporal fields while preserving formal DICOM conformance, potentially shifting anomaly distributions independently of scanner-side acquisition behavior.
+
+Despite these limits, the evaluation remains valid for the stated goal: assessing the practical utility of a local metadata platform in realistic research workflows.
+
+\section{Limitations}
+The current implementation has several acknowledged limitations. Automated test coverage is not yet comprehensive, especially for parser edge-case regressions and route-level behavior. Private-tag interpretation remains largely heuristic beyond selected vendor payload parsing. Security and access controls are suitable for controlled local contexts but not hardened for broader multi-user deployment.
+
+In addition, while representative-series selection improves dashboard aggregation behavior, certain specialized analyses may still require full series-level or instance-level treatment. The platform preserves enough context to support such extensions, but this is not the current default aggregation model.
+
+A further practical limitation concerns the availability of datasets. Although the FDG-PET-CT-Lesions collection was intended as an additional external benchmark, 2025 constraints on controlled access prevented its inclusion in this project workflow. This constrained cross-dataset comparison breadth and should be considered when interpreting generalization claims.
+
+In addition, the anonymization integrity evaluation in this thesis aligns conceptually with current benchmark-oriented de-identification discourse (e.g., MIDI-B style benchmarking). Still, it has not yet been directly benchmarked against those challenge protocols \cite{pei2025medicalimagedeidentificationbenchmark}. The empirical concentration of negative delays in AnonAxilla and MIRROR\_A indicates that the Siemens teamplay Privacy Protection App (version 2.1), used for those subsets, likely altered temporal fields in a way that preserved formal DICOM validity while violating clinical time-order plausibility.
+
+According to project-internal supervisor communication, this issue was reported to the vendor, and an updated tool version was subsequently provided. This thesis does not independently verify the vendor-side correction and therefore reports only measurements obtained from the version 2.1 workflow used during the evaluated runs.
+
+Additional technical limits should be made explicit. First, the current aggregation model is optimized for representative static-series analysis and does not yet model dynamic PET frame-level kinetics as a first-class entity. Second, the SQLite operations in this thesis are engineered for single-writer processing per databank run; heavy concurrent multi-writer ingestion would require architectural changes to locking and job orchestration. Third, severe corruption of the unique identifier (UID) hierarchy (e.g., inconsistent Study/Series/Service-Object-Pair (SOP) linkage across files) can reduce grouping reliability and would benefit from dedicated hierarchy-repair heuristics. Fourth, cross-study normalization conflicts can arise when nominally identical protocol labels map to different scanner software behaviors; this currently requires analyst interpretation rather than automatic semantic harmonization.
+
+\section{Extended Analysis}
+\subsection{Extended System Analysis}
+This chapter deepens the technical analysis of the implemented system by examining how design choices interact with reliability, maintainability, and long-term extensibility. While previous chapters established the architecture and empirical behavior, the present chapter focuses on engineering rationale under realistic constraints.
+
+A recurring insight during development was that metadata pipelines are vulnerable to compounding assumptions. If discovery assumes uniform naming, extraction assumes strict formatting, and storage assumes complete identifiers, then each assumption can amplify errors from the previous stage. The final design, therefore, avoids brittle dependencies and instead uses defensive boundaries with explicit fallback behavior. This strategy increases robustness in heterogeneous repositories at the cost of slightly more code complexity, but the trade-off is favorable for practical use.
+
+Another key insight concerns the stability of workflows over time. In research projects, requirements evolve: new fields become important, quality thresholds are revised, and datasets arrive incrementally. A system optimized for a single fixed run configuration quickly becomes obsolete. By including migration handling, representative re-marking, and rerun-safe insertion behavior, the implementation supports longitudinal use rather than one-time extraction.
+
+\paragraph{Failure Isolation as a Design Objective}
+Failure isolation was treated as a first-class objective. The processing pipeline should continue when individual files are unreadable or malformed, while preserving enough accounting information for diagnosis. In practice, this required local error handling at the file level and the avoidance of global failure propagation from optional fields.
+
+This objective has methodological implications. A pipeline that fails hard on the first malformed file may look cleaner in controlled benchmarks, but is less useful in real repositories. By contrast, a resilient pipeline can produce usable outputs even when inputs are imperfect, allowing analysts to inspect quality distributions rather than only binary pass/fail outcomes.
+
+\paragraph{Schema Evolution and Backward Compatibility}
+Research software often evolves faster than its data artifacts. Databanks created in early versions should remain useful after schema expansion. The migration strategy in this project is additive and conservative: missing columns are added at initialization, and existing data remains intact. This avoids forcing users to regenerate all databanks whenever metadata coverage expands.
+
+Backward compatibility also improves collaborative workflows. Team members can share databanks generated at slightly different times and still reopen them in updated versions of the tool. In academic settings where hardware and schedule constraints vary across contributors, this is a practical advantage.
+
+\paragraph{Interpretability of Quality Signals}
+Quality metrics were intentionally designed for interpretability. Every displayed indicator should map to concrete fields and explicit computation logic. This approach avoids overfitting user trust to opaque scores and supports manual validation when anomalies appear.
+
+Interpretability also supports supervision and review. Advisors can inspect whether a metric is semantically justified and whether thresholds are plausible in context. In contrast, black-box quality outputs are difficult to critique and less useful in scientific reporting.
+
+\subsection{Deployment and Operationalization Considerations}
+Although the current implementation targets local research settings, deployment considerations were analyzed to support transition toward broader use. The most important distinction is between single-user exploratory workflows and multi-user operational environments.
+
+In single-user settings, simplicity dominates. Local SQLite storage, direct command invocation, and integrated web browsing provide a productive workflow with minimal overhead. In multi-user settings, additional concerns arise: concurrency management, permission boundaries, auditability, and lifecycle governance of exported subsets.
+
+A practical transition path should preserve existing module boundaries while replacing selected infrastructure components. For example, storage can migrate from SQLite to a client-server database without changing discovery and extraction logic. Similarly, ingestion can move from interactive command execution to background job queues while preserving extraction code paths.
+
+\paragraph{Operational Monitoring}
+Current logs provide basic runtime feedback, but operational deployment benefits from structured monitoring. A future-ready monitoring layer should report ingestion throughput, invalid-file rates, private-tag volume trends, and quality-flag distributions over time. Such monitoring can reveal upstream pipeline changes and silent regressions before they affect analysis outputs.
+
+\paragraph{Backup and Recovery}
+Databank artifacts are compact relative to source repositories, making backup strategies practical. Regular snapshotting of databanks, together with command history and software version metadata, enables recovery of analysis states. This is especially important when quality findings influence inclusion/exclusion decisions in ongoing studies.
+
+\paragraph{Interface Stability}
+For long-running projects, interface stability matters as much as raw capability. Small but frequent UI behavior changes can disrupt analysts. Therefore, future evolution should favor additive enhancements and preserve key interaction patterns for search, filtering, and export.
+
+\subsection{Data Protection, Ethics, and Governance}
+Medical metadata workflows require explicit attention to governance even in research settings. De-identification reduces direct identification risk but does not eliminate sensitivity. Metadata can still encode institutional patterns, temporal information, and private pipeline markers that require controlled handling.
+From an integrity perspective, governance must also cover the side effects of anonymization tooling itself, because timestamp transformations can silently weaken protocol-level interpretability even when identifying fields are removed correctly.
+
+This thesis does not claim legal compliance certification; instead, it proposes a practical governance posture aligned with research reality. The core principle is minimizing uncontrolled data movement. Users should export only necessary fields, store databanks in controlled locations, and document processing steps that affect data interpretation.
+
+An implementation update following the core evaluation added a dedicated, anonymized databank export workflow to the web interface. The update enables users to export a copy of the SQLite databank while replacing selected identifying fields (for example patient name or patient ID) with arbitrary alphanumeric placeholders. The anonymization scope is configurable at export time via explicit field selection, supporting data minimization and improving usability for controlled data sharing in research collaborations.
+
+\paragraph{Risk Categories}
+Governance risks can be grouped into confidentiality, integrity, and reproducibility risks. Confidentiality risk arises when metadata or exports are shared beyond intended boundaries. Integrity risk arises when preprocessing modifies the semantic meaning without clear documentation. Reproducibility risk arises when the command history and the dataset state are not traceable.
+
+The implemented system mitigates parts of these risks through persistent databanks, explicit command workflows, and quality analytics, but additional controls are required for broader deployment. These include role-based access, encrypted storage policies, and auditable export logs.
+
+\paragraph{Ethical Use in Research Contexts}
+Ethical use requires that quality findings are not overinterpreted beyond their methodological scope. For example, detection of temporal anomalies indicates potential inconsistency, not automatic exclusion. Domain experts must review context before drawing strong conclusions. A responsible workflow combines automated indicators with human judgment.
+
+\subsection{Reproducibility Framework}
+Reproducibility in this project is treated as a layered property spanning software, data snapshots, and workflow execution. The current baseline is strong for day-to-day research use: explicit command-line runs, persistent databank artifacts, and stable representative-series logic. The next maturity step is automated provenance capture per run, including revision identifiers, command arguments, input snapshot signatures, and quality-metric summaries. In collaborative settings, this should be complemented by shared processing profiles and threshold conventions so equivalent runs produce comparable outputs.
+
+\subsection{Expanded Evaluation Commentary}
+The measured runtime profile indicates a clear optimization target: extraction, not insertion. This suggests that future performance work should focus on parser throughput, I/O locality, and candidate prefiltering rather than solely on storage tuning. The existing insertion strategy is already efficient for the current scale.
+
+Storage reduction behavior demonstrates the effectiveness of metadata-first persistence. The observed ratios are expected because pixel arrays dominate source size. However, reduction factors differ across datasets due to modality composition, series structure, and metadata richness. This variation is informative and should be reported rather than normalized away.
+
+Completeness distributions underscore a key methodological point: dataset size does not imply analysis readiness. A large repository with sparse key fields may be less useful for specific tasks than a smaller but complete dataset. Integrated completeness views are therefore not auxiliary features; they are central to study planning.
+
+Temporal anomalies observed in one subset illustrate the value of immediate quality visibility. Without integrated checks, such issues may remain undiscovered until late statistical analysis. Early detection allows targeted review and reduces the risk of invalid downstream assumptions.
+
+\paragraph{Sensitivity to Threshold Choices}
+Quality metrics that depend on thresholds should be interpreted as policy-dependent outputs. The threshold itself is not a universal truth but a configurable boundary for a workflow objective. Future versions should externalize thresholds into profile definitions to improve transparency and comparability.
+
+\paragraph{Longitudinal Evaluation Potential}
+As additional cohorts are processed over time, the system can support longitudinal quality monitoring. Trends in completeness, anomaly rates, and private-tag distributions may reveal changes in institutional pipelines or scanner configuration transitions. This opens a path from one-time evaluation to ongoing metadata observability.
+
+\section{Operational Outlook and Continuation}
+\subsection{Practical Guidance for Thesis and Project Continuation}
+This section summarizes concrete guidance for continuing the project after thesis submission. The priority is test expansion. Unit tests should cover discovery filters, time parsing, delay computation, and private-tag classification rules. Integration tests should cover representative ingestion scenarios with synthetic fixtures and selected real subsets.
+
+The second priority is configurability. Quality thresholds, modality mappings, and representative scoring weights should move into explicit configuration files. This change will improve transparency and reduce the need for code edits for workflow-specific adaptations.
+
+The third priority is documentation structure. Documentation should be separated into a user handbook, a developer guide, and an operations guide. This will improve onboarding and reduce dependence on implicit project memory.
+
+The fourth priority is optional scaling paths. If usage expands to concurrent multi-user patterns, storage and ingestion services can be separated while preserving existing module boundaries. This evolutionary path is feasible because the current architecture is already layered.
+
+\subsection{Synthesis and Outlook in Research Practice}
+A central outcome of this thesis is the demonstration that metadata engineering can be operationalized as an iterative scientific workflow rather than a one-time preprocessing script. In traditional script-first workflows, quality checks are often appended after extraction, making them vulnerable to omission. In the presented system, quality checks are structurally integrated with ingestion, storage, and exploration, so quality information becomes part of the default workflow rather than an optional add-on.
+
+This integration has practical consequences for research planning. When researchers begin with an explicit metadata quality profile, they can make earlier and more defensible decisions about cohort composition, exclusion criteria, and analysis feasibility. They can also communicate these decisions more transparently to supervisors and collaborators because the underlying evidence remains queryable in a persistent databank.
+
+Another important synthesis point concerns technical debt and sustainability. Small research tools often become brittle as their use expands. In this project, maintainability was supported by explicit module boundaries, migration-aware storage initialization, and shared discovery logic. These design choices create a stronger base for follow-up work, especially in academic settings where projects are handed over between students.
+
+Beyond immediate engineering utility, the system supports future research on metadata governance, anomaly detection, and protocol harmonization. The persistent databank model makes retrospective analysis easier than repeated flat-file exports and provides a reusable base artifact for follow-up work.
+
+\subsection{Implications for Future Thesis and Team Work}
+Future thesis projects can build on this foundation in two complementary directions. One direction is scientific deepening, for example, by studying private-tag semantics systematically or by validating quality thresholds against protocol-specific expert labels. The other direction is systems scaling, for example, by introducing asynchronous ingestion services, role-based access controls, and long-term monitoring dashboards.
+
+Importantly, these directions are not mutually exclusive. A scalable architecture without interpretable quality semantics has limited research value, and highly detailed semantics without operational robustness are difficult to apply in practice. The most impactful continuation combines both.
+
+\subsection{Final Reflection}
+This thesis was developed under realistic engineering constraints and therefore emphasizes practical correctness over idealized completeness. The resulting system is not presented as a finished endpoint but as a stable and useful artifact that already improves workflow quality. Its strongest contribution lies in making metadata quality visible, reproducible, and operationally actionable in day-to-day research practice.
+
+\section{Methodological Positioning}
+\subsection{Methodological Rigor and Decision Traceability}
+This thesis does not claim algorithmic novelty in the sense of a new parsing algorithm or a new anomaly-detection model. The primary innovation is architectural and methodological: integrating discovery, extraction, normalization, validation, persistence, and exploration into one reproducible system artifact with explicit decision traceability.
+
+A common weakness in applied software theses is that engineering decisions are described only as implementation facts without making their methodological consequences explicit. In this work, decision traceability was treated as part of the scientific contribution. Every major technical decision in the pipeline can be connected to a research workflow need and to an observable effect in evaluation output.
+
+For discovery, the decision to combine extension checks, signature checks, and parse fallback was motivated by heterogeneous real repositories and validated by improved practical candidate coverage. For extraction, the decision to avoid pixel loading was motivated by metadata-centric use cases and validated by runtime behavior that supports iterative processing. For storage, the decision to use an indexed SQLite databank with migration handling was motivated by local deployability and longitudinal project use, and validated by stable rerun behavior and compact storage footprints.
+
+For quality analytics, the decision to focus on interpretable metrics rather than opaque composite models was motivated by the need for supervisor review and practical troubleshooting. This decision was validated by the ability to connect anomaly counts directly to known field combinations and by the usefulness of those signals during dataset triage.
+
+This traceability perspective is important because it distinguishes a coherent engineering thesis from a collection of loosely related features. A thesis-quality system should not only work; it should also provide a clear argument for why it was built that way and how observed results support those design choices.
+
+\subsection{Comparative Positioning Against Typical Research Pipelines}
+To understand the project's practical contribution, it is useful to compare it with the most common baseline in academic environments: script-based metadata extraction into CSV or JSON, followed by notebook-specific post-processing. That baseline has clear strengths. It is flexible, easy to start, and familiar to many researchers. However, it also has recurring weaknesses.
+
+First, script baselines often duplicate logic across projects and cohorts. Slightly different discovery rules, naming assumptions, or parsing shortcuts can produce incompatible outputs that are difficult to reconcile. Second, quality checks are often added late and inconsistently, increasing the risk that silent data issues will propagate into statistical analysis. Third, flat exports can become hard to maintain when new questions require reprocessing with different fields or filters.
+
+The system presented in this thesis addresses these weaknesses through persistent, queryable state and integrated quality workflows. Instead of treating each export as a final artifact, it treats the databank as a living metadata layer that can support repeated exploration and evolving analysis questions. This does not eliminate the value of exports; rather, it changes their role from primary storage to interoperability output.
+
+Compared with heavy enterprise systems, the contribution is different. Enterprise solutions typically excel in archival guarantees and broad integration, but they can be cumbersome for custom local analysis loops in small teams. The local-first thesis system reduces operational friction for exploratory research while preserving a clear path for future scaling, if needed.
+
+\subsection{Positioning Relative to Orthanc and dcm4che}
+A likely comparison point in defense is Orthanc or dcm4che. These platforms are strong infrastructure components, but their default design center differs from this thesis artifact. Orthanc is primarily a DICOM server ecosystem optimized for interoperable service operation (e.g., storage, query/retrieve, plugin-based extensions). dcm4che is a broad toolkit and server stack with strong standards coverage and integration capabilities. By contrast, the present system targets local-first metadata normalization, relational persistence, and integrated QA analytics for research workflows where rapid cohort triage and anomaly visibility are primary goals.
+
+The practical distinction is workflow orientation. In this thesis system, the discovery of heterogeneous files, representative-series aggregation, QA anomaly logic, and export-ready derived metadata are integrated by default into a single lightweight pipeline. In Orthanc/dcm4che, equivalent behavior is achievable but typically requires additional configuration, plugins, or external analytics layers. Therefore, this work should be interpreted as complementary rather than competitive: it emphasizes metadata QA and reproducible analysis loops over the breadth of server-centric deployment.

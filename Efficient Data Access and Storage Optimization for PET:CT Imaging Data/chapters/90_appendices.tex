@@ -1,0 +1,63 @@
+\appendix
+\chapter{Reproducibility Commands}
+This appendix lists command templates only. Methodology, metric definitions, and interpretation are covered in Chapter 4.
+For portability and privacy, local absolute paths are replaced by placeholders.
+\texttt{<RAW\_DIR\_X>} and \texttt{<FILTERED\_DIR\_X>} denote dataset-specific input roots for dataset \(X\); \texttt{<DB\_X>} denotes an output databank path.
+
+\section{Filtered-Input Benchmark Commands (Primary Evaluation)}
+Use one command per dataset:
+\begin{lstlisting}[breaklines=true,basicstyle=\ttfamily\small]
+python3 process_dicom.py <FILTERED_DIR_X> <DB_X> --no-subdirs --timing --max-workers 8
+\end{lstlisting}
+
+\section{Three-Stage Size Measurement Commands}
+For each dataset, measure:
+\begin{enumerate}
+\item raw input folder size,
+\item one-instance-per-series filtered folder size,
+\item processed databank size.
+\end{enumerate}
+
+One-instance-per-series subsets were generated with:
+\begin{lstlisting}[breaklines=true,basicstyle=\ttfamily\small]
+python3 extract_one_per_series.py <RAW_DIR_X> <ONE_PER_SERIES_DIR_X>
+\end{lstlisting}
+
+Size measurement (bytes):
+\begin{lstlisting}[breaklines=true,basicstyle=\ttfamily\small]
+du -sb <RAW_DIR_X> <ONE_PER_SERIES_DIR_X> <DB_X>
+\end{lstlisting}
+
+\section{Raw vs Filtered Time and Memory Commands}
+\begin{lstlisting}[breaklines=true,basicstyle=\ttfamily\small]
+/usr/bin/time -l python3 process_dicom.py <RAW_DIR_X> <RAW_DB_X> --no-subdirs --timing --max-workers 8
+/usr/bin/time -l python3 process_dicom.py <FILTERED_DIR_X> <FILTERED_DB_X> --no-subdirs --timing --max-workers 8
+\end{lstlisting}
+
+\section{Repeated Runtime Stability Commands}
+Run five repetitions per dataset:
+\begin{lstlisting}[breaklines=true,basicstyle=\ttfamily\small]
+python3 process_dicom.py <FILTERED_DIR_X> <REPEAT_DB_X> --no-subdirs --timing --no-auto-workers --max-workers 8
+\end{lstlisting}
+
+\chapter{Supplementary Evaluation Notes}
+Values in Chapter 4 are environment-specific baselines and should be interpreted comparatively. For publication-grade benchmarking, keep controlled system load, fixed worker settings, and repeated measurements with variance reporting.
+
+\section{Hardware Specification}
+All benchmarks in this thesis were executed on the local development machine used throughout the project:
+\begin{itemize}
+\item Model: MacBook Pro (Model Identifier: Mac15,3)
+\item Chip: Apple M3
+\item CPU Cores: 8 total (4 performance + 4 efficiency)
+\item Memory: 8 GB
+\item Architecture: arm64
+\item Operating System: macOS 26.3 (Build 25D125)
+\end{itemize}
+
+\section{Project Material on GitHub}
+All project materials used in this thesis are maintained in the GitHub repository:
+\begin{center}
+\url{https://github.com/cccelik/DICOM-Metadata-Browser}
+\end{center}
+
+The repository contains the source code (\texttt{process\_dicom.py}, \texttt{extract\_metadata.py}, \texttt{store\_metadata.py}, \texttt{webui.py}).
