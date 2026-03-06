@@ -18,7 +18,7 @@ An additional construct validity risk is that preprocessing performed by externa
 Despite these limits, the evaluation remains valid for the stated goal: assessing the practical utility of a local metadata platform in realistic research workflows.
 
 \section{Limitations}
-The current implementation has several acknowledged limitations. Automated test coverage is not yet comprehensive, especially for parser edge-case regressions and route-level behavior. Private-tag interpretation remains largely heuristic beyond selected vendor payload parsing. Security and access controls are suitable for controlled local contexts but not hardened for broader multi-user deployment.
+The current implementation has several acknowledged limitations. Automated testing covers core discovery, extraction helper logic, processing helpers, anonymized export behavior, and key storage/web integration paths, but coverage is still incomplete for rare parser edge cases, long-running concurrency scenarios, and large heterogeneous archive stress cases. Private-tag interpretation remains largely heuristic beyond selected vendor payload parsing. Security and access controls are suitable for controlled local contexts but not hardened for broader multi-user deployment.
 
 In addition, while representative-series selection improves dashboard aggregation behavior, certain specialized analyses may still require full series-level or instance-level treatment. The platform preserves enough context to support such extensions, but this is not the current default aggregation model.
 
@@ -105,7 +105,7 @@ As additional cohorts are processed over time, the system can support longitudin
 
 \section{Operational Outlook and Continuation}
 \subsection{Practical Guidance for Thesis and Project Continuation}
-This section summarizes concrete guidance for continuing the project after thesis submission. The priority is test expansion. Unit tests should cover discovery filters, time parsing, delay computation, and private-tag classification rules. Integration tests should cover representative ingestion scenarios with synthetic fixtures and selected real subsets.
+This section summarizes concrete guidance for continuing the project after thesis submission. A first priority remains test expansion beyond the now-established baseline suite: property-based and fuzz-style tests should target parser robustness, malformed private payloads, and temporal-field edge cases. Integration tests should further cover representative ingestion scenarios with synthetic fixtures and selected real subsets, especially for complex archive and incremental rerun workflows.
 
 The second priority is configurability. Quality thresholds, modality mappings, and representative scoring weights should move into explicit configuration files. This change will improve transparency and reduce the need for code edits for workflow-specific adaptations.
 

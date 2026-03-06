@@ -189,6 +189,22 @@ Study-level CSV export supports selectable field sets, grouped export modes, sec
 \subsection{Validation and Demonstration Tooling}
 The project also includes synthetic data tooling for reproducible demonstrations. Mock generation supports single-file output, structured tree generation, and dashboard-focused cohorts with controlled variation across patient naming, modality, manufacturer, radiopharmaceutical context, delay anomalies, dose-per-kg spread, and missing-value scenarios. This supports repeatable UI demonstrations, regression testing of filters and QA logic, and the generation of thesis-ready figures.
 
+\subsection{Automated Test and CI Coverage}
+Beyond manual workflow validation, the implementation includes an automated Python test suite covering discovery logic, extraction helpers, processing helpers, storage integration, anonymized export behavior, and web-level utility functions.
+
+The implemented suite currently comprises 58 passing tests organized under \path{tests/}. Representative modules are:
+\begin{itemize}
+\item \path{test_dicom_discovery.py}
+\item \path{test_extract_metadata_utils.py}
+\item \path{test_process_dicom_helpers.py}
+\item \path{test_store_metadata_integration.py}
+\item \path{test_webui_utils.py}
+\item \path{test_webui_anonymized_export.py}
+\end{itemize}
+Fixtures use synthetic values to avoid exposing real patient identifiers in test artifacts.
+
+Continuous Integration (CI) executes this suite automatically through GitHub Actions (\path{.github/workflows/tests.yml}) on push and pull-request events. This provides baseline regression protection for core workflow logic, including anonymization controls introduced after the initial evaluation runs.
+
 \section{Data Model and Query Design}
 
 The storage model is pragmatic and optimized for local analytics. It preserves enough structure for meaningful filtering and aggregation while avoiding excessive schema fragmentation. Study and series identifiers provide robust grouping behavior, and indexed columns support common UI and export query paths.

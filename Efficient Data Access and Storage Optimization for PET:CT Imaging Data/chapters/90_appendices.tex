@@ -40,6 +40,22 @@ Run five repetitions per dataset:
 python3 process_dicom.py <FILTERED_DIR_X> <REPEAT_DB_X> --no-subdirs --timing --no-auto-workers --max-workers 8
 \end{lstlisting}
 
+\section{Automated Test Execution Commands}
+The implemented automated test suite can be executed locally with:
+\begin{lstlisting}[breaklines=true,basicstyle=\ttfamily\small]
+python3 -m unittest discover -s tests -v
+\end{lstlisting}
+
+The suite currently contains 58 tests spanning discovery, extraction helpers, processing helpers, storage integration, and anonymized export/web utility behavior.
+
+\section{Continuous Integration Configuration}
+Regression checks are also executed in GitHub Actions using:
+\begin{lstlisting}[breaklines=true,basicstyle=\ttfamily\small]
+.github/workflows/tests.yml
+\end{lstlisting}
+
+The workflow runs on push and pull-request events, installs project requirements, and executes the same unittest discovery command.
+
 \chapter{Supplementary Evaluation Notes}
 Values in Chapter 4 are environment-specific baselines and should be interpreted comparatively. For publication-grade benchmarking, keep controlled system load, fixed worker settings, and repeated measurements with variance reporting.
 
@@ -60,4 +76,10 @@ All project materials used in this thesis are maintained in the GitHub repositor
 \url{https://github.com/cccelik/DICOM-Metadata-Browser}
 \end{center}
 
-The repository contains the source code (\texttt{process\_dicom.py}, \texttt{extract\_metadata.py}, \texttt{store\_metadata.py}, \texttt{webui.py}).
+The repository contains:
+\begin{itemize}
+\item source modules such as \path{process_dicom.py}, \path{extract_metadata.py}, \path{store_metadata.py}, and \path{webui.py},
+\item the automated test suite under \path{tests/},
+\item CI workflow definitions under \path{.github/workflows/}.
+\item the thesis report sources and generated document under \path{Efficient Data Access and Storage Optimization for PET:CT Imaging Data/}.
+\end{itemize}
