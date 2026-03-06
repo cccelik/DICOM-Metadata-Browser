@@ -167,6 +167,6 @@ Config:
 ## Thesis Build
 
 ```bash
-cd thesis/TUM_Thesis_for_Informatics_Template
+cd Efficient\ Data\ Access\ and\ Storage\ Optimization\ for\ PET:CT\ Imaging\ Data
 latexmk -pdf -interaction=nonstopmode -file-line-error main.tex
 ```
