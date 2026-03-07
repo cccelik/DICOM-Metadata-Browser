@@ -53,8 +53,8 @@ EXPORT_SECTIONS = [
             {"name": "patient_name", "label_key": "patient_name", "default": True},
             {"name": "patient_id", "label_key": "patient_id", "default": True},
             {"name": "patient_birth_date", "label_key": "patient_birth_date", "default": True},
-            {"name": "patient_sex", "label_key": "patient_sex"},
-            {"name": "patient_age", "label_key": "patient_age"},
+            {"name": "patient_sex", "label_key": "patient_sex", "default": True},
+            {"name": "patient_age", "label_key": "patient_age", "default": True},
             {"name": "patient_weight", "label_key": "patient_weight", "default": True},
             {"name": "patient_size", "label_key": "patient_height", "default": True},
             {"name": "bmi", "label_key": "bmi"},
@@ -67,7 +67,7 @@ EXPORT_SECTIONS = [
             {"name": "study_instance_uid", "label_key": "study_uid"},
             {"name": "study_date", "label_key": "study_date", "default": True},
             {"name": "study_time", "label_key": "study_time", "default": True},
-            {"name": "study_description", "label_key": "study_description"},
+            {"name": "study_description", "label_key": "study_description", "default": True},
             {"name": "study_id", "label_key": "study_id"},
             {"name": "accession_number", "label_key": "accession_number"},
             {"name": "referring_physician_name", "label_key": "referring_physician"},
@@ -82,17 +82,18 @@ EXPORT_SECTIONS = [
             {"name": "series_date", "label_key": "series_date"},
             {"name": "series_time", "label_key": "series_time"},
             {"name": "series_description", "label_key": "description", "default": True},
-            {"name": "protocol_name", "label_key": "protocol_name"},
+            {"name": "protocol_name", "label_key": "protocol_name", "default": True},
             {"name": "modality", "label_key": "modality", "default": True},
-            {"name": "body_part_examined", "label_key": "body_part"},
+            {"name": "body_part_examined", "label_key": "body_part", "default": True},
+            {"name": "series_type", "label_key": "series_type", "default": True},
         ],
     },
     {
         "key": "manufacturer",
         "label_key": "manufacturer_information",
         "fields": [
-            {"name": "manufacturer", "label_key": "manufacturer"},
-            {"name": "manufacturer_model_name", "label_key": "model"},
+            {"name": "manufacturer", "label_key": "manufacturer", "default": True},
+            {"name": "manufacturer_model_name", "label_key": "model", "default": True},
             {"name": "station_name", "label_key": "station_name"},
             {"name": "software_version", "label_key": "software_version"},
             {"name": "device_serial_number", "label_key": "device_serial_number"},
@@ -107,14 +108,15 @@ EXPORT_SECTIONS = [
             {"name": "acquisition_date", "label_key": "acquisition_date", "default": True},
             {"name": "acquisition_time", "label_key": "acquisition_time", "default": True},
             {"name": "patient_position", "label_key": "patient_position"},
-            {"name": "scanning_sequence", "label_key": "scanning_sequence"},
-            {"name": "sequence_variant", "label_key": "sequence_variant"},
-            {"name": "scan_options", "label_key": "scan_options"},
+            {"name": "scanning_sequence", "label_key": "scanning_sequence", "default": True},
+            {"name": "sequence_variant", "label_key": "sequence_variant", "default": True},
+            {"name": "scan_options", "label_key": "scan_options", "default": True},
             {"name": "acquisition_type", "label_key": "acquisition_type"},
             {"name": "slice_thickness", "label_key": "slice_thickness"},
             {"name": "reconstruction_diameter", "label_key": "reconstruction_diameter"},
             {"name": "reconstruction_algorithm", "label_key": "reconstruction_algorithm"},
-            {"name": "convolution_kernel", "label_key": "convolution_kernel"},
+            {"name": "convolution_kernel", "label_key": "convolution_kernel", "default": True},
+            {"name": "reconstruction_method", "label_key": "reconstruction_method", "default": True},
             {"name": "filter_type", "label_key": "filter_type"},
             {"name": "spiral_pitch_factor", "label_key": "spiral_pitch_factor"},
             {"name": "ctdivol", "label_key": "ctdivol"},
@@ -123,6 +125,9 @@ EXPORT_SECTIONS = [
             {"name": "exposure_time", "label_key": "exposure_time"},
             {"name": "exposure", "label_key": "exposure"},
             {"name": "tube_current", "label_key": "tube_current"},
+            {"name": "attenuation_correction_method", "label_key": "attenuation_correction_method"},
+            {"name": "scatter_correction_method", "label_key": "scatter_correction_method"},
+            {"name": "scatter_fraction_factor", "label_key": "scatter_fraction_factor"},
         ],
     },
     {
@@ -133,10 +138,10 @@ EXPORT_SECTIONS = [
             {"name": "injected_activity", "label_key": "injected_activity", "default": True},
             {"name": "injection_time", "label_key": "injection_time", "default": True},
             {"name": "injection_date", "label_key": "injection_date", "default": True},
-            {"name": "half_life", "label_key": "half_life"},
-            {"name": "decay_correction", "label_key": "decay_correction"},
-            {"name": "radiopharmaceutical_volume", "label_key": "radiopharmaceutical_volume"},
-            {"name": "radionuclide_total_dose", "label_key": "radionuclide_total_dose"},
+            {"name": "half_life", "label_key": "half_life", "default": True},
+            {"name": "decay_correction", "label_key": "decay_correction", "default": True},
+            {"name": "radiopharmaceutical_volume", "label_key": "radiopharmaceutical_volume", "default": True},
+            {"name": "radionuclide_total_dose", "label_key": "radionuclide_total_dose", "default": True},
             {"name": "uptake_delay", "label_key": "uptake_delay"},
             {"name": "dose_per_kg", "label_key": "dose_per_kg"},
         ],
@@ -146,12 +151,14 @@ EXPORT_SECTIONS = [
         "label_key": "image_information",
         "fields": [
             {"name": "image_type", "label_key": "image_type"},
-            {"name": "pixel_spacing", "label_key": "pixel_spacing"},
+            {"name": "pixel_spacing", "label_key": "pixel_spacing", "default": True},
             {"name": "image_orientation_patient", "label_key": "image_orientation_patient"},
             {"name": "slice_location", "label_key": "slice_location"},
-            {"name": "number_of_frames", "label_key": "number_of_frames"},
+            {"name": "rows", "label_key": "rows", "default": True},
+            {"name": "columns", "label_key": "columns"},
+            {"name": "number_of_frames", "label_key": "number_of_frames", "default": True},
             {"name": "frame_time", "label_key": "frame_time"},
-            {"name": "number_of_slices", "label_key": "number_of_slices"},
+            {"name": "number_of_slices", "label_key": "number_of_slices", "default": True},
         ],
     },
     {
@@ -346,6 +353,21 @@ def build_anonymize_fields(translations: dict) -> List[dict]:
     return fields
 
 
+def resolve_export_fields(requested_fields: List[str]) -> List[str]:
+    selected_fields = [name for name in EXPORT_FIELD_ORDER if name in requested_fields]
+    if not selected_fields:
+        return list(EXPORT_DEFAULT_FIELDS)
+    return selected_fields
+
+
+def resolve_csv_anonymize_fields(requested_fields: List[str], enabled: bool) -> List[str]:
+    if not enabled:
+        return []
+    requested_set = {name for name in requested_fields if name in ANONYMIZE_FIELD_ORDER}
+    selected_set = set(ANONYMIZE_DEFAULT_FIELDS) | requested_set
+    return [name for name in ANONYMIZE_FIELD_ORDER if name in selected_set]
+
+
 def sanitize_filename(value: str, fallback: str = "export") -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value or "").strip("._")
     return safe or fallback
@@ -487,6 +509,30 @@ def format_export_value(field_name: str, row_dict: dict) -> str:
         unit, decimals = EXPORT_NUMERIC_FORMATS[field_name]
         return format_number_with_unit(value, unit, decimals)
     return str(value)
+
+
+def anonymize_export_value(
+    field_name: str,
+    row_dict: dict,
+    anonymize_fields: Set[str],
+    anonymize_cache: Dict[Tuple[str, str], str],
+    anonymize_counts: Dict[str, int],
+) -> str:
+    if field_name not in anonymize_fields:
+        return format_export_value(field_name, row_dict)
+    value = row_dict.get(field_name)
+    if value is None or str(value).strip() == "":
+        return ""
+    if field_name in ANONYMIZE_BLANK_FIELDS:
+        return ""
+    cache_key = (field_name, str(value))
+    cached = anonymize_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    anonymize_counts[field_name] = anonymize_counts.get(field_name, 0) + 1
+    replacement = _generate_anonymized_value(field_name, anonymize_counts[field_name])
+    anonymize_cache[cache_key] = replacement
+    return replacement
 
 
 def _generate_anonymized_value(field_name: str, index: int) -> str:
@@ -1517,6 +1563,8 @@ def index():
         translations=translations,
     )
     context["anonymize_fields"] = build_anonymize_fields(translations)
+    context["export_sections"], _ = build_export_sections(translations)
+    context["export_modalities"] = []
 
     if not os.path.exists(db_path):
         context["error"] = "Database not found"
@@ -1871,6 +1919,7 @@ def study_detail(study_uid):
             databanks=databanks,
             export_sections=export_sections,
             export_modalities=payload["export_modalities"],
+            anonymize_fields=build_anonymize_fields(translations),
             t=translations,
             lang=get_language(),
         )
@@ -1891,9 +1940,11 @@ def export_study_csv(study_uid):
         return f"Database not found: {db_path}", 404
 
     requested_fields = request.args.getlist('fields')
-    selected_fields = [name for name in EXPORT_FIELD_ORDER if name in requested_fields]
-    if not selected_fields:
-        selected_fields = list(EXPORT_DEFAULT_FIELDS)
+    selected_fields = resolve_export_fields(requested_fields)
+    csv_anonymize_fields = set(resolve_csv_anonymize_fields(
+        request.args.getlist('anonymize_field'),
+        request.args.get('anonymize') == '1',
+    ))
     group_mode = request.args.get('group')
     suppress_repeats = group_mode == 'modality'
     sectioned = group_mode == 'sectioned'
@@ -1945,6 +1996,8 @@ def export_study_csv(study_uid):
     writer = csv.writer(output)
     writer.writerow(header)
     last_group_values = {}
+    anonymize_cache: Dict[Tuple[str, str], str] = {}
+    anonymize_counts: Dict[str, int] = {}
     if sectioned:
         patient_fields = [f for f in selected_fields if f in EXPORT_GROUP_CLEAR_FIELDS]
         if patient_fields:
@@ -1959,7 +2012,9 @@ def export_study_csv(study_uid):
                     if patient_weight and patient_size and patient_size > 0:
                         patient_row[name] = f"{(patient_weight / (patient_size * patient_size)):.1f}"
                         continue
-                patient_row[name] = format_export_value(name, base_row)
+                patient_row[name] = anonymize_export_value(
+                    name, base_row, csv_anonymize_fields, anonymize_cache, anonymize_counts
+                )
             writer.writerow([patient_row.get(name, "") for name in selected_fields])
             writer.writerow([])
     for index, row in enumerate(rows):
@@ -1993,7 +2048,12 @@ def export_study_csv(study_uid):
             )
             if patient_weight and patient_size and patient_size > 0:
                 row_dict["bmi"] = patient_weight / (patient_size * patient_size)
-        formatted_row = {name: format_export_value(name, row_dict) for name in selected_fields}
+        formatted_row = {
+            name: anonymize_export_value(
+                name, row_dict, csv_anonymize_fields, anonymize_cache, anonymize_counts
+            )
+            for name in selected_fields
+        }
         if sectioned:
             for field_name in EXPORT_GROUP_CLEAR_FIELDS:
                 if field_name in formatted_row:
@@ -2016,6 +2076,88 @@ def export_study_csv(study_uid):
     patient_name = format_patient_name(name_row["patient_name"]) if name_row else ""
     name_slug = sanitize_filename(patient_name) if patient_name else "patient"
     filename = sanitize_filename(f"{name_slug}_{study_uid}") + ".csv"
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+@app.route('/databanks/export.csv')
+def export_databank_csv():
+    """Export the whole databank as CSV with selectable fields."""
+    db_name = normalize_db_name(request.args.get('db'))
+    db_path = resolve_db_path(db_name)
+
+    if not os.path.exists(db_path):
+        return f"Database not found: {db_path}", 404
+
+    translations = get_translations()
+    _, label_map = build_export_sections(translations)
+    selected_fields = resolve_export_fields(request.args.getlist('fields'))
+    csv_anonymize_fields = set(resolve_csv_anonymize_fields(
+        request.args.getlist('anonymize_field'),
+        request.args.get('anonymize') == '1',
+    ))
+
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.execute("PRAGMA table_info(dicom_metadata)")
+        existing_columns = {str(row[1]) for row in cursor.fetchall()}
+
+        derived_selected = any(field in EXPORT_DERIVED_FIELDS for field in selected_fields)
+        extra_fields = [
+            field for field in sorted(EXPORT_DERIVED_DEPENDENCIES)
+            if field in existing_columns
+        ] if derived_selected else []
+        real_fields = [
+            field for field in selected_fields
+            if field not in EXPORT_DERIVED_FIELDS and field in existing_columns
+        ]
+        export_fields = [
+            field for field in selected_fields
+            if field in EXPORT_DERIVED_FIELDS or field in existing_columns
+        ]
+        select_fields = list(dict.fromkeys(real_fields + extra_fields))
+        select_exprs = [f'"{field}"' for field in select_fields] if select_fields else ['id']
+        column_list = ", ".join(select_exprs)
+
+        rows = conn.execute(
+            f"""
+            SELECT {column_list}
+            FROM dicom_metadata
+            ORDER BY study_date DESC, study_time DESC, study_instance_uid ASC, series_number ASC, series_time ASC, id ASC
+            """
+        ).fetchall()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([label_map.get(name, name) for name in export_fields])
+        anonymize_cache: Dict[Tuple[str, str], str] = {}
+        anonymize_counts: Dict[str, int] = {}
+        for row in rows:
+            row_dict = dict(row)
+            if derived_selected:
+                patient_weight = get_patient_weight(row_dict)
+                injected_activity = parse_db_float(row_dict.get("injected_activity"))
+                if patient_weight and injected_activity:
+                    activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
+                    dose_per_kg = activity_mbq / patient_weight
+                    if 0 < dose_per_kg < 100:
+                        row_dict["dose_per_kg"] = dose_per_kg
+                patient_size = parse_db_float(row_dict.get("patient_size"))
+                if patient_weight and patient_size and patient_size > 0:
+                    row_dict["bmi"] = patient_weight / (patient_size * patient_size)
+            writer.writerow([
+                anonymize_export_value(
+                    name, row_dict, csv_anonymize_fields, anonymize_cache, anonymize_counts
+                )
+                for name in export_fields
+            ])
+    finally:
+        conn.close()
+
+    filename = sanitize_filename(f"{Path(db_name).stem}_full_export") + ".csv"
     return Response(
         output.getvalue(),
         mimetype="text/csv",

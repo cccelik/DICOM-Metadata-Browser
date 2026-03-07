@@ -21,6 +21,9 @@ class StoreMetadataIntegrationTests(unittest.TestCase):
             self.assertIn("scan_root", cols)
             self.assertIn("protocol_name", cols)
             self.assertIn("is_representative", cols)
+            self.assertIn("rows", cols)
+            self.assertIn("series_type", cols)
+            self.assertIn("reconstruction_method", cols)
             conn.close()
 
     def test_insert_metadata_and_study_exists(self):

@@ -1,4 +1,7 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import extract_metadata
 from pydicom.dataset import Dataset
@@ -106,6 +109,55 @@ class ExtractMetadataUtilsTests(unittest.TestCase):
         self.assertEqual(len(tags), 1)
         self.assertEqual(tags[0]["creator"], "SIEMENS CSA HEADER")
         self.assertEqual(tags[0]["classification"], "vendor_semantic")
+
+    def test_extract_metadata_reads_additional_export_fields(self):
+        ds = Dataset()
+        ds.PatientID = "P1"
+        ds.StudyInstanceUID = "STUDY1"
+        ds.SeriesInstanceUID = "SERIES1"
+        ds.SOPInstanceUID = "SOP1"
+        ds.SoftwareVersions = "VG80B"
+        ds.ReconstructionMethod = "PSF+TOF 4i5s"
+        ds.Rows = 440
+        ds.Columns = 512
+        ds.SeriesType = ["WHOLE BODY", "IMAGE"]
+        ds.AttenuationCorrectionMethod = "measured,AC"
+        ds.ScatterCorrectionMethod = "Model-based"
+        ds.ScatterFractionFactor = "0.472194"
+
+        with TemporaryDirectory() as td:
+            dcm_path = Path(td) / "sample.dcm"
+            dcm_path.write_bytes(b"DICM")
+            with patch.object(extract_metadata.pydicom, "dcmread", return_value=ds):
+                meta = extract_metadata.extract_metadata(dcm_path)
+
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta.software_version, "VG80B")
+        self.assertEqual(meta.reconstruction_method, "PSF+TOF 4i5s")
+        self.assertEqual(meta.rows, 440)
+        self.assertEqual(meta.columns, 512)
+        self.assertEqual(meta.series_type, "['WHOLE BODY', 'IMAGE']")
+        self.assertEqual(meta.attenuation_correction_method, "measured,AC")
+        self.assertEqual(meta.scatter_correction_method, "Model-based")
+        self.assertAlmostEqual(meta.scatter_fraction_factor, 0.472194, places=6)
+
+    def test_extract_metadata_prefers_number_of_slices_over_images_in_acquisition(self):
+        ds = Dataset()
+        ds.PatientID = "P1"
+        ds.StudyInstanceUID = "STUDY1"
+        ds.SeriesInstanceUID = "SERIES1"
+        ds.SOPInstanceUID = "SOP1"
+        ds.NumberOfSlices = "123"
+        ds.ImagesInAcquisition = "456"
+
+        with TemporaryDirectory() as td:
+            dcm_path = Path(td) / "sample.dcm"
+            dcm_path.write_bytes(b"DICM")
+            with patch.object(extract_metadata.pydicom, "dcmread", return_value=ds):
+                meta = extract_metadata.extract_metadata(dcm_path)
+
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta.number_of_slices, 123)
 
 
 if __name__ == "__main__":

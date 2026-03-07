@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     reconstruction_diameter REAL,
     reconstruction_algorithm TEXT,
     convolution_kernel TEXT,
+    reconstruction_method TEXT,
     filter_type TEXT,
     spiral_pitch_factor REAL,
     ctdivol REAL,
@@ -91,9 +92,15 @@ CREATE TABLE IF NOT EXISTS dicom_metadata (
     pixel_spacing TEXT,
     image_orientation_patient TEXT,
     slice_location REAL,
+    rows INTEGER,
+    columns INTEGER,
     number_of_frames INTEGER,
     frame_time REAL,
     number_of_slices INTEGER,
+    series_type TEXT,
+    attenuation_correction_method TEXT,
+    scatter_correction_method TEXT,
+    scatter_fraction_factor REAL,
 
     -- Private (CTP anonymizer) metadata
     ctp_collection TEXT,
@@ -222,12 +229,19 @@ def init_database(db_path: str, optimize: bool = True):
         ("reconstruction_diameter", "REAL"),
         ("reconstruction_algorithm", "TEXT"),
         ("convolution_kernel", "TEXT"),
+        ("reconstruction_method", "TEXT"),
         ("filter_type", "TEXT"),
         ("spiral_pitch_factor", "REAL"),
         ("ctdivol", "REAL"),
         ("dlp", "REAL"),
+        ("rows", "INTEGER"),
+        ("columns", "INTEGER"),
         ("number_of_frames", "INTEGER"),
         ("frame_time", "REAL"),
+        ("series_type", "TEXT"),
+        ("attenuation_correction_method", "TEXT"),
+        ("scatter_correction_method", "TEXT"),
+        ("scatter_fraction_factor", "REAL"),
     ]
     for col_name, col_type in migrations:
         if col_name not in existing_cols:

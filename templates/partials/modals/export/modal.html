@@ -26,6 +26,12 @@
                     <span>{{ t.export_sectioned }}</span>
                 </label>
             </div>
+            <div class="export-modal-actions" style="justify-content: flex-start;">
+                <label class="export-field">
+                    <input type="checkbox" id="export-anonymize">
+                    <span>{{ t.export_csv_anonymize or 'Anonymize CSV export' }}</span>
+                </label>
+            </div>
             <div class="export-sections">
                 {% for section in export_sections %}
                 <div class="export-section">
@@ -68,6 +74,30 @@
                                 checked
                             >
                             <span>{{ modality }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                {% if anonymize_fields %}
+                <div class="export-section">
+                    <div class="export-modal-actions" style="margin-bottom: 12px;">
+                        <div><strong>{{ t.export_db_select_fields or 'Choose fields to anonymize' }}</strong></div>
+                        <div class="export-action-group">
+                            <button type="button" class="export-small-button" id="export-anonymize-all">{{ t.export_select_all }}</button>
+                            <button type="button" class="export-small-button" id="export-anonymize-none">{{ t.export_select_none }}</button>
+                        </div>
+                    </div>
+                    <div class="export-field-grid">
+                        {% for field in anonymize_fields %}
+                        <label class="export-field">
+                            <input
+                                type="checkbox"
+                                class="export-anonymize-field-toggle"
+                                data-export-anonymize-field="{{ field.name }}"
+                                {% if field.default %}checked{% endif %}
+                            >
+                            <span>{{ field.label }}</span>
                         </label>
                         {% endfor %}
                     </div>

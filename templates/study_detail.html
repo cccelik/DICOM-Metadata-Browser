@@ -1092,7 +1092,7 @@
                                         {% endif %}
                                         {% if s.number_of_slices %}
                                         <tr>
-                                            <th>{{ t.number_of_slices or 'Images in Acquisition' }}</th>
+                                            <th>{{ t.number_of_slices or 'Number of Slices' }}</th>
                                             <td>{{ s.number_of_slices }}</td>
                                         </tr>
                                         {% endif %}
@@ -1158,6 +1158,10 @@
         const exportModalities = Array.from(document.querySelectorAll('.export-modality-toggle'));
         const exportModalitySelectAll = document.getElementById('export-modalities-all');
         const exportModalitySelectNone = document.getElementById('export-modalities-none');
+        const exportAnonymizeToggle = document.getElementById('export-anonymize');
+        const exportAnonymizeFields = Array.from(document.querySelectorAll('.export-anonymize-field-toggle'));
+        const exportAnonymizeAll = document.getElementById('export-anonymize-all');
+        const exportAnonymizeNone = document.getElementById('export-anonymize-none');
 
         function summarizeCsaBlock(block) {
             const raw = block.getAttribute('data-csa');
@@ -1321,10 +1325,22 @@
                     alert('{{ t.export_select_one }}');
                     return;
                 }
+                const anonymizeEnabled = exportAnonymizeToggle && exportAnonymizeToggle.checked;
+                const selectedAnonymizeFields = exportAnonymizeFields
+                    .filter(field => field.checked)
+                    .map(field => field.dataset.exportAnonymizeField);
+                if (anonymizeEnabled && selectedAnonymizeFields.length === 0) {
+                    alert('{{ t.export_db_select_one or "Select at least one field to anonymize." }}');
+                    return;
+                }
                 const params = new URLSearchParams();
                 params.set('db', '{{ db_name }}');
                 params.set('lang', '{{ lang }}');
                 selected.forEach(field => params.append('fields', field));
+                if (anonymizeEnabled) {
+                    params.set('anonymize', '1');
+                    selectedAnonymizeFields.forEach(field => params.append('anonymize_field', field));
+                }
                 exportModalities
                     .filter(field => field.checked)
                     .map(field => field.dataset.exportModality)
@@ -1337,6 +1353,18 @@
                 const url = `/study/{{ study_info.study_instance_uid }}/export.csv?${params.toString()}`;
                 window.location.href = url;
                 closeExportModal();
+            });
+        }
+
+        if (exportAnonymizeAll) {
+            exportAnonymizeAll.addEventListener('click', () => {
+                exportAnonymizeFields.forEach(field => { field.checked = true; });
+            });
+        }
+
+        if (exportAnonymizeNone) {
+            exportAnonymizeNone.addEventListener('click', () => {
+                exportAnonymizeFields.forEach(field => { field.checked = false; });
             });
         }
     </script>

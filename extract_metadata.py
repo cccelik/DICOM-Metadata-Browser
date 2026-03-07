@@ -74,6 +74,7 @@ class DICOMMetadata:
     reconstruction_diameter: Optional[float] = None
     reconstruction_algorithm: Optional[str] = None
     convolution_kernel: Optional[str] = None
+    reconstruction_method: Optional[str] = None
     filter_type: Optional[str] = None
     spiral_pitch_factor: Optional[float] = None
     ctdivol: Optional[float] = None
@@ -101,9 +102,15 @@ class DICOMMetadata:
     pixel_spacing: Optional[str] = None
     image_orientation_patient: Optional[str] = None
     slice_location: Optional[float] = None
+    rows: Optional[int] = None
+    columns: Optional[int] = None
     number_of_frames: Optional[int] = None
     frame_time: Optional[float] = None
     number_of_slices: Optional[int] = None
+    series_type: Optional[str] = None
+    attenuation_correction_method: Optional[str] = None
+    scatter_correction_method: Optional[str] = None
+    scatter_fraction_factor: Optional[float] = None
 
     # Private (CTP anonymizer) metadata
     ctp_collection: Optional[str] = None
@@ -479,7 +486,7 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     meta.manufacturer = safe_getattr(ds, 'Manufacturer')
     meta.manufacturer_model_name = safe_getattr(ds, 'ManufacturerModelName')
     meta.station_name = safe_getattr(ds, 'StationName')
-    meta.software_version = safe_getattr(ds, 'SoftwareVersion')
+    meta.software_version = safe_getattr(ds, 'SoftwareVersions') or safe_getattr(ds, 'SoftwareVersion')
     meta.device_serial_number = safe_getattr(ds, 'DeviceSerialNumber')
     meta.institution_name = safe_getattr(ds, 'InstitutionName')
     meta.institution_address = safe_getattr(ds, 'InstitutionAddress')
@@ -496,6 +503,7 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     meta.reconstruction_diameter = safe_getattr(ds, 'ReconstructionDiameter', float)
     meta.reconstruction_algorithm = safe_getattr(ds, 'ReconstructionAlgorithm')
     meta.convolution_kernel = safe_getattr(ds, 'ConvolutionKernel')
+    meta.reconstruction_method = safe_getattr(ds, 'ReconstructionMethod')
     meta.filter_type = safe_getattr(ds, 'FilterType')
     meta.spiral_pitch_factor = safe_getattr(ds, 'SpiralPitchFactor', float)
     meta.ctdivol = safe_getattr(ds, 'CTDIvol', float)
@@ -547,9 +555,19 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
     meta.pixel_spacing = safe_getattr(ds, 'PixelSpacing')
     meta.image_orientation_patient = safe_getattr(ds, 'ImageOrientationPatient')
     meta.slice_location = safe_getattr(ds, 'SliceLocation', float)
+    meta.rows = safe_getattr(ds, 'Rows', int)
+    meta.columns = safe_getattr(ds, 'Columns', int)
     meta.number_of_frames = safe_getattr(ds, 'NumberOfFrames', int)
     meta.frame_time = safe_getattr(ds, 'FrameTime', float)
-    meta.number_of_slices = safe_getattr(ds, 'ImagesInAcquisition', int) or meta.number_of_frames
+    meta.number_of_slices = (
+        safe_getattr(ds, 'NumberOfSlices', int)
+        or safe_getattr(ds, 'ImagesInAcquisition', int)
+        or meta.number_of_frames
+    )
+    meta.series_type = safe_getattr(ds, 'SeriesType')
+    meta.attenuation_correction_method = safe_getattr(ds, 'AttenuationCorrectionMethod')
+    meta.scatter_correction_method = safe_getattr(ds, 'ScatterCorrectionMethod')
+    meta.scatter_fraction_factor = safe_getattr(ds, 'ScatterFractionFactor', float)
     meta.sop_instance_uid = safe_getattr(ds, 'SOPInstanceUID')
 
     def _get_ctp_value(element_offset: int):

@@ -314,6 +314,7 @@
     {% set databank_url_template = '/?db=%s&lang=%s' %}
     {% call render_top_bar('top-index-hamburger', 'top-index-menu', '&nbsp;', lang_url_template, databank_url_template, t, lang, db_name, databanks) %}
         <a href="/dashboard?db={{ db_name }}">{{ t.dashboard }}</a>
+        <button type="button" onclick="openDbExportModal(); closeTopMenu();" class="menu-upload">{{ t.export_db_csv or 'Export Database CSV' }}</button>
         <button type="button" onclick="openAnonymizeDbModal(); closeTopMenu();" class="menu-upload">{{ t.export_db or 'Export Database' }}</button>
         <button type="button" onclick="toggleUploadZone(); closeTopMenu();" class="menu-upload">{{ t.upload }}</button>
     {% endcall %}
@@ -538,6 +539,7 @@
     </div>
 
     {% include "partials/modals/anonymized_export/modal.html" %}
+    {% include "partials/modals/export/modal.html" %}
 
     {% include "partials/create_databank_modal.html" %}
 
@@ -549,12 +551,39 @@
         const progressText = document.getElementById('progress-text');
         const filtersToggle = document.getElementById('filters-toggle');
         const filtersPanel = document.getElementById('filters-panel');
+        const exportModal = document.getElementById('export-modal');
+        const exportFields = Array.from(document.querySelectorAll('.export-field-toggle'));
+        const exportSelectAll = document.getElementById('export-select-all');
+        const exportSelectNone = document.getElementById('export-select-none');
+        const exportConfirm = document.getElementById('export-confirm');
+        const exportCloseButtons = document.querySelectorAll('[data-export-close]');
+        const exportSectionToggles = Array.from(document.querySelectorAll('.export-section-toggle'));
+        const exportAnonymizeToggle = document.getElementById('export-anonymize');
+        const exportAnonymizeFields = Array.from(document.querySelectorAll('.export-anonymize-field-toggle'));
+        const exportAnonymizeAll = document.getElementById('export-anonymize-all');
+        const exportAnonymizeNone = document.getElementById('export-anonymize-none');
         const anonymizeDbModal = document.getElementById('anonymize-db-modal');
         const anonymizeDbFields = Array.from(document.querySelectorAll('.anonymize-db-field-toggle'));
         const anonymizeDbSelectAll = document.getElementById('anonymize-db-select-all');
         const anonymizeDbSelectNone = document.getElementById('anonymize-db-select-none');
         const anonymizeDbConfirm = document.getElementById('anonymize-db-confirm');
         const anonymizeDbCloseButtons = document.querySelectorAll('[data-anonymize-db-close]');
+
+        function openDbExportModal() {
+            if (!exportModal) {
+                return;
+            }
+            exportModal.classList.add('open');
+            exportModal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeDbExportModal() {
+            if (!exportModal) {
+                return;
+            }
+            exportModal.classList.remove('open');
+            exportModal.setAttribute('aria-hidden', 'true');
+        }
 
         function openAnonymizeDbModal() {
             if (!anonymizeDbModal) {
@@ -589,6 +618,109 @@
             filtersToggle.addEventListener('click', () => {
                 const isOpen = filtersPanel.classList.toggle('open');
                 filtersToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+        }
+
+        function updateSectionState(sectionKey) {
+            const sectionFields = exportFields.filter(field => field.dataset.section === sectionKey);
+            const toggle = exportSectionToggles.find(field => field.dataset.exportSection === sectionKey);
+            if (!toggle || !sectionFields.length) {
+                return;
+            }
+            const checkedCount = sectionFields.filter(field => field.checked).length;
+            toggle.checked = checkedCount === sectionFields.length;
+            toggle.indeterminate = checkedCount > 0 && checkedCount < sectionFields.length;
+        }
+
+        exportCloseButtons.forEach(button => {
+            button.addEventListener('click', closeDbExportModal);
+        });
+
+        if (exportModal) {
+            exportModal.addEventListener('click', (event) => {
+                if (event.target === exportModal) {
+                    closeDbExportModal();
+                }
+            });
+        }
+
+        exportSectionToggles.forEach(toggle => {
+            toggle.addEventListener('change', () => {
+                const sectionKey = toggle.dataset.exportSection;
+                exportFields
+                    .filter(field => field.dataset.section === sectionKey)
+                    .forEach(field => { field.checked = toggle.checked; });
+                updateSectionState(sectionKey);
+            });
+        });
+
+        exportFields.forEach(field => {
+            field.addEventListener('change', () => updateSectionState(field.dataset.section));
+        });
+
+        exportSectionToggles.forEach(toggle => updateSectionState(toggle.dataset.exportSection));
+
+        if (exportSelectAll) {
+            exportSelectAll.addEventListener('click', () => {
+                exportFields.forEach(field => {
+                    field.checked = true;
+                });
+                exportSectionToggles.forEach(toggle => updateSectionState(toggle.dataset.exportSection));
+            });
+        }
+
+        if (exportSelectNone) {
+            exportSelectNone.addEventListener('click', () => {
+                exportFields.forEach(field => {
+                    field.checked = false;
+                });
+                exportSectionToggles.forEach(toggle => updateSectionState(toggle.dataset.exportSection));
+            });
+        }
+
+        if (exportConfirm) {
+            exportConfirm.addEventListener('click', () => {
+                const selectedFields = exportFields
+                    .filter(field => field.checked)
+                    .map(field => field.dataset.exportField);
+                if (!selectedFields.length) {
+                    alert('{{ t.export_select_one }}');
+                    return;
+                }
+                const anonymizeEnabled = exportAnonymizeToggle && exportAnonymizeToggle.checked;
+                const selectedAnonymizeFields = exportAnonymizeFields
+                    .filter(field => field.checked)
+                    .map(field => field.dataset.exportAnonymizeField);
+                if (anonymizeEnabled && !selectedAnonymizeFields.length) {
+                    alert('{{ t.export_db_select_one or "Select at least one field to anonymize." }}');
+                    return;
+                }
+                const params = new URLSearchParams();
+                params.set('db', '{{ db_name }}');
+                params.set('lang', '{{ lang }}');
+                selectedFields.forEach(field => params.append('fields', field));
+                if (anonymizeEnabled) {
+                    params.set('anonymize', '1');
+                    selectedAnonymizeFields.forEach(field => params.append('anonymize_field', field));
+                }
+                window.location.href = `/databanks/export.csv?${params.toString()}`;
+                closeDbExportModal();
+            });
+        }
+
+        if (exportAnonymizeAll) {
+            exportAnonymizeAll.addEventListener('click', () => {
+                exportAnonymizeFields.forEach(field => {
+                    field.checked = true;
+                });
+            });
+        }
+
+        if (exportAnonymizeNone) {
+            exportAnonymizeNone.addEventListener('click', () => {
+                exportAnonymizeFields.forEach(field => {
+                    field.checked = false;
+                });
             });
         }
 

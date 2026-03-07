@@ -101,6 +101,75 @@ class WebUiUtilsTests(unittest.TestCase):
         self.assertIn("label", fields[0])
         self.assertIn("default", fields[0])
 
+    def test_resolve_export_fields_defaults_and_filtering(self):
+        defaults = webui.resolve_export_fields([])
+        self.assertEqual(defaults, webui.EXPORT_DEFAULT_FIELDS)
+
+        selected = webui.resolve_export_fields(["patient_id", "unknown_field", "modality"])
+        self.assertEqual(selected, ["patient_id", "modality"])
+
+    def test_resolve_csv_anonymize_fields_disabled_and_defaults(self):
+        self.assertEqual(webui.resolve_csv_anonymize_fields(["patient_id"], enabled=False), [])
+
+        selected = webui.resolve_csv_anonymize_fields(["patient_id", "unknown_field"], enabled=True)
+        self.assertIn("patient_id", selected)
+        self.assertIn("patient_name", selected)
+        self.assertIn("file_path", selected)
+        self.assertNotIn("unknown_field", selected)
+
+    def test_anonymize_export_value_tokenizes_consistently(self):
+        anonymize_cache = {}
+        anonymize_counts = {}
+        row = {"patient_name": "Doe^John"}
+
+        first = webui.anonymize_export_value(
+            "patient_name",
+            row,
+            {"patient_name"},
+            anonymize_cache,
+            anonymize_counts,
+        )
+        second = webui.anonymize_export_value(
+            "patient_name",
+            row,
+            {"patient_name"},
+            anonymize_cache,
+            anonymize_counts,
+        )
+
+        self.assertEqual(first, second)
+        self.assertTrue(first.startswith("PATIENTNAM_0001_"))
+
+    def test_anonymize_export_value_blanks_configured_fields(self):
+        anonymize_cache = {}
+        anonymize_counts = {}
+        row = {"study_description": "Sensitive Study"}
+
+        value = webui.anonymize_export_value(
+            "study_description",
+            row,
+            {"study_description"},
+            anonymize_cache,
+            anonymize_counts,
+        )
+
+        self.assertEqual(value, "")
+
+    def test_anonymize_export_value_passthrough_when_not_selected(self):
+        anonymize_cache = {}
+        anonymize_counts = {}
+        row = {"patient_name": "Doe^John"}
+
+        value = webui.anonymize_export_value(
+            "patient_name",
+            row,
+            set(),
+            anonymize_cache,
+            anonymize_counts,
+        )
+
+        self.assertEqual(value, "Doe John")
+
     def test_build_export_sections_translation_and_fallback(self):
         sections, label_map = webui.build_export_sections(
             {"patient_information": "Patient Info", "patient_name": "Patient Name"}
