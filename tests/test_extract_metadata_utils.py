@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-import extract_metadata
+from dicom_browser import extract_metadata
 from pydicom.dataset import Dataset
 from pydicom.tag import Tag
 

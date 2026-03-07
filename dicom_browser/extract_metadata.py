@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pydicom  # type: ignore[import]
 from pydicom.errors import InvalidDicomError
 
-from dicom_discovery import collect_dicom_files, is_metadata_artifact
+from .dicom_discovery import collect_dicom_files, is_metadata_artifact
 
 
 @dataclass

@@ -6,7 +6,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-import store_metadata
+from dicom_browser import store_metadata
 import webui
 
 

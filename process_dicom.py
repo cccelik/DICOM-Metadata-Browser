@@ -16,9 +16,9 @@ import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from dicom_discovery import collect_dicom_files, is_dicom_candidate
-from extract_metadata import extract_metadata_from_paths
-from qa_utils import (
+from dicom_browser.dicom_discovery import collect_dicom_files, is_dicom_candidate
+from dicom_browser.extract_metadata import extract_metadata_from_paths
+from dicom_browser.qa_utils import (
     calculate_raw_injection_delay_minutes,
     compute_delay_minutes as shared_compute_delay_minutes,
     compute_dose_per_kg as shared_compute_dose_per_kg,
@@ -26,7 +26,7 @@ from qa_utils import (
     parse_time_to_24hour as shared_parse_time_to_24hour,
     select_study_representatives,
 )
-from store_metadata import init_database
+from dicom_browser.store_metadata import init_database
 
 warnings.filterwarnings(
     "ignore",
@@ -122,7 +122,7 @@ def _bulk_insert_metadata(
     progress_total: Optional[int] = None,
     vprint=None,
 ) -> Tuple[int, int, int]:
-    from store_metadata import insert_metadata
+    from dicom_browser.store_metadata import insert_metadata
 
     processed = 0
     skipped_duplicates = 0
@@ -227,7 +227,7 @@ def process_single_scan(
     scan_root_label: Optional[str] = None,
 ) -> Tuple[int, int, int, List[str], Dict[str, float]]:
     """Process a single scan directory and store its metadata in the database."""
-    from store_metadata import study_exists
+    from dicom_browser.store_metadata import study_exists
     scan_root = scan_root_label or str(base_dir.resolve())
     timings: Dict[str, float] = {}
     t0 = time.perf_counter()

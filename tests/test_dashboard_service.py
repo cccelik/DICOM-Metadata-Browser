@@ -3,8 +3,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from dashboard_service import build_dashboard_payload
-from store_metadata import init_database
+from dicom_browser.dashboard_service import build_dashboard_payload
+from dicom_browser.store_metadata import init_database
 
 
 class DashboardServiceTests(unittest.TestCase):

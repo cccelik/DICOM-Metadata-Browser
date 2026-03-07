@@ -12,7 +12,7 @@ import string
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional, Set, Tuple
 
-from qa_utils import (
+from .qa_utils import (
     RADIOPHARM_MODALITIES,
     calculate_raw_injection_delay_minutes,
     get_patient_weight,

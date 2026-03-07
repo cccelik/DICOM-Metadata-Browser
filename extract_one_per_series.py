@@ -9,7 +9,7 @@ import os
 import shutil
 from pathlib import Path
 
-from dicom_discovery import is_dicom_candidate
+from dicom_browser.dicom_discovery import is_dicom_candidate
 
 
 def _copy_api_path(path: Path) -> str:

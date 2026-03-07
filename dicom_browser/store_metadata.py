@@ -6,7 +6,7 @@ Simple SQLite storage for DICOM metadata
 import sqlite3
 from typing import List
 
-from extract_metadata import DICOMMetadata
+from .extract_metadata import DICOMMetadata
 
 DB_SCHEMA = """
 CREATE TABLE IF NOT EXISTS dicom_metadata (

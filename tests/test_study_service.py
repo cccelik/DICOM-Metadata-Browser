@@ -3,8 +3,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from store_metadata import init_database
-from study_service import build_study_detail_payload, resolve_display_path
+from dicom_browser.store_metadata import init_database
+from dicom_browser.study_service import build_study_detail_payload, resolve_display_path
 
 
 class StudyServiceTests(unittest.TestCase):

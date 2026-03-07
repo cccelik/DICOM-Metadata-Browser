@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import dicom_discovery
+from dicom_browser import dicom_discovery
 
 
 class DicomDiscoveryTests(unittest.TestCase):
@@ -63,7 +63,7 @@ class DicomDiscoveryTests(unittest.TestCase):
             base = Path(td)
             file_path = base / "noext"
             file_path.write_text("x")
-            with patch("dicom_discovery.pydicom.dcmread", side_effect=ValueError("bad")):
+            with patch("dicom_browser.dicom_discovery.pydicom.dcmread", side_effect=ValueError("bad")):
                 self.assertFalse(dicom_discovery.can_parse_as_dicom(file_path))
 
     def test_is_dicom_candidate_rejects_symlink(self):

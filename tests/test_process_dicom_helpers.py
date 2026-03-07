@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 import process_dicom
-import store_metadata
+from dicom_browser import store_metadata
 
 
 class ProcessDicomHelpersTests(unittest.TestCase):

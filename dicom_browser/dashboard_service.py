@@ -8,9 +8,9 @@ import sqlite3
 import statistics
 from typing import Dict, List, Optional
 
-from export_utils import is_radiopharm_modality
-from qa_utils import compute_dose_from_row, get_patient_weight, parse_db_float
-from store_metadata import init_database
+from .export_utils import is_radiopharm_modality
+from .qa_utils import compute_dose_from_row, get_patient_weight, parse_db_float
+from .store_metadata import init_database
 
 IDEAL_UPTAKE_TIME_MINUTES = 60
 IDEAL_DOSE_PER_KG_MBQ = 3.0

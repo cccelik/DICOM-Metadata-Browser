@@ -2,8 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from extract_metadata import DICOMMetadata
-import store_metadata
+from dicom_browser.extract_metadata import DICOMMetadata
+from dicom_browser import store_metadata
 
 
 class StoreMetadataIntegrationTests(unittest.TestCase):

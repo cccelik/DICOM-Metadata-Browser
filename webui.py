@@ -31,8 +31,8 @@ from flask import (
     session,
 )
 
-from dashboard_service import build_dashboard_payload as build_dashboard_payload_service
-from export_utils import (
+from dicom_browser.dashboard_service import build_dashboard_payload as build_dashboard_payload_service
+from dicom_browser.export_utils import (
     _generate_anonymized_value as generate_anonymized_value_impl,
     anonymize_export_value as anonymize_export_value_impl,
     build_anonymize_fields as build_anonymize_fields_impl,
@@ -53,7 +53,7 @@ from export_utils import (
     write_csv_export_rows as write_csv_export_rows_impl,
 )
 from process_dicom import process_directory
-from qa_utils import (
+from dicom_browser.qa_utils import (
     compute_delay_minutes as shared_compute_delay_minutes,
     compute_dose_from_row as shared_compute_dose_from_row,
     compute_dose_per_kg as shared_compute_dose_per_kg,
@@ -62,9 +62,9 @@ from qa_utils import (
     parse_time_to_24hour as shared_parse_time_to_24hour,
     select_study_representatives as shared_select_study_representatives,
 )
-from study_service import build_study_detail_payload as build_study_detail_payload_service
-from store_metadata import init_database
-from translations import get_translation
+from dicom_browser.store_metadata import init_database
+from dicom_browser.study_service import build_study_detail_payload as build_study_detail_payload_service
+from dicom_browser.translations import get_translation
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # Required for sessions
@@ -828,13 +828,13 @@ def _load_private_tag_items(
     series_uids: List[str],
     classification: str,
 ) -> Dict[str, List[dict]]:
-    from study_service import _load_private_tag_items as load_private_tag_items_impl
+    from dicom_browser.study_service import _load_private_tag_items as load_private_tag_items_impl
 
     return load_private_tag_items_impl(conn, series_uids, classification)
 
 
 def resolve_display_path(scan_root: Optional[str], file_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    from study_service import resolve_display_path as resolve_display_path_impl
+    from dicom_browser.study_service import resolve_display_path as resolve_display_path_impl
 
     return resolve_display_path_impl(scan_root, file_path)
 

@@ -1,15 +1,8 @@
 *
 !.gitignore
-!extract_metadata.py
 !process_dicom.py
-!store_metadata.py
 !webui.py
 !extract_one_per_series.py
-!dicom_discovery.py
-!qa_utils.py
-!export_utils.py
-!study_service.py
-!dashboard_service.py
 !pyproject.toml
 !.flake8
 !requirements.txt
@@ -18,12 +11,14 @@
 !.github/workflows/
 !.github/workflows/**
 !TUMLogo.svg
-!translations.py
+!dicom_browser/
+!dicom_browser/**
+!scripts/
+!scripts/**
 !templates/
 !templates/**
 !tests/
 !tests/**
-!create_mock_dicom.py
 !Efficient Data Access and Storage Optimization for PET:CT Imaging Data/
 !Efficient Data Access and Storage Optimization for PET:CT Imaging Data/**
 !Efficient Data Access and Storage Optimization for PET:CT Imaging Data.pdf
