@@ -11,6 +11,7 @@ Extract DICOM metadata into SQLite, explore it in a Flask web UI, and run QA-foc
 - Computes representative-series flags per study to avoid QA double-counting.
 - Exposes a web UI for filtering, dashboard analytics, study inspection, and CSV export.
 - Supports anonymized database export with path scrubbing and private-tag payload scrubbing.
+- Supports CSV export with selectable fields, optional anonymization, and an explicit export-language selector.
 
 ## Requirements
 
@@ -78,8 +79,8 @@ python3 process_dicom.py /path/to/file dicom_metadata.db
 ### Metadata-only extraction (JSON)
 
 ```bash
-python3 extract_metadata.py /path/to/dicom_dir
-python3 extract_metadata.py /path/to/dicom_dir -o /tmp/metadata.json -m 8 -t
+python3 -m dicom_browser.extract_metadata /path/to/dicom_dir
+python3 -m dicom_browser.extract_metadata /path/to/dicom_dir -o /tmp/metadata.json -m 8 -t
 ```
 
 ### One-per-series helper
@@ -118,6 +119,17 @@ Behavior highlights:
 - Private-tag payload columns are scrubbed.
 - Export runs with `secure_delete` + `VACUUM` to reduce recoverable deleted text.
 
+### CSV export
+
+From the study page or databank page: **Export CSV**.
+
+Behavior highlights:
+
+- Field selection is configurable in the export modal.
+- CSV anonymization can be enabled without modifying the databank.
+- Export language can be selected directly in the modal (`English` or `Deutsch`).
+- CSV headers follow the selected export language, independent of the current page language.
+
 ## Testing
 
 Run all tests locally:
@@ -150,19 +162,28 @@ Config:
 
 - `webui.py`: Flask app and UI routes
 - `process_dicom.py`: ingest pipeline and representative-series pruning
-- `extract_metadata.py`: DICOM parser and private-tag extraction
-- `store_metadata.py`: SQLite schema and write path
-- `dicom_discovery.py`: shared DICOM candidate detection
+- `extract_one_per_series.py`: one-file-per-series helper
+- `dicom_browser/`: shared application package
+- `dicom_browser/extract_metadata.py`: DICOM parser and private-tag extraction
+- `dicom_browser/store_metadata.py`: SQLite schema and write path
+- `dicom_browser/dicom_discovery.py`: shared DICOM candidate detection
+- `dicom_browser/qa_utils.py`: shared QA and representative-series helpers
+- `dicom_browser/export_utils.py`: CSV export formatting and anonymization helpers
+- `dicom_browser/study_service.py`: study-detail payload assembly
+- `dicom_browser/dashboard_service.py`: dashboard aggregation logic
+- `dicom_browser/translations.py`: translation dictionaries
+- `scripts/`: auxiliary scripts such as mock DICOM generation
 - `templates/`: HTML templates
 - `tests/`: unit/integration tests
 - `Databanks/`: SQLite databanks
-- `thesis/`: thesis source files
+- `Efficient Data Access and Storage Optimization for PET:CT Imaging Data/`: thesis source files
 
 ## Notes
 
 - CLI accepts absolute DB paths; non-absolute names are normalized into `Databanks/<name>.db`.
 - UI `db` parameter is treated as a filename and resolved inside `Databanks/`.
 - Duplicate series ingestion is prevented by unique `series_instance_uid`.
+- The root directory is intentionally kept small; most reusable Python code now lives in `dicom_browser/`.
 
 ## Thesis Build
 
