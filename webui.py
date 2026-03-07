@@ -33,7 +33,40 @@ from flask import (
     session,
 )
 
+from dashboard_service import build_dashboard_payload as build_dashboard_payload_service
+from export_utils import (
+    _generate_anonymized_value as generate_anonymized_value_impl,
+    anonymize_export_value as anonymize_export_value_impl,
+    build_anonymize_fields as build_anonymize_fields_impl,
+    build_export_sections as build_export_sections_impl,
+    calculate_injection_delay as calculate_injection_delay_impl,
+    format_date as format_date_impl,
+    format_delay as format_delay_impl,
+    format_export_value as format_export_value_impl,
+    format_patient_name as format_patient_name_impl,
+    format_private_timestamp as format_private_timestamp_impl,
+    format_time as format_time_impl,
+    is_radiopharm_modality as is_radiopharm_modality_impl,
+    parse_pet_dose_report as parse_pet_dose_report_impl,
+    resolve_csv_anonymize_fields as resolve_csv_anonymize_fields_impl,
+    resolve_export_fields as resolve_export_fields_impl,
+    resolve_export_query_fields as resolve_export_query_fields_impl,
+    sanitize_filename as sanitize_filename_impl,
+    write_csv_export_rows as write_csv_export_rows_impl,
+)
 from process_dicom import process_directory
+from qa_utils import (
+    RADIOPHARM_MODALITIES,
+    calculate_raw_injection_delay_minutes,
+    compute_delay_minutes as shared_compute_delay_minutes,
+    compute_dose_from_row as shared_compute_dose_from_row,
+    compute_dose_per_kg as shared_compute_dose_per_kg,
+    get_patient_weight as shared_get_patient_weight,
+    parse_db_float as shared_parse_db_float,
+    parse_time_to_24hour as shared_parse_time_to_24hour,
+    select_study_representatives as shared_select_study_representatives,
+)
+from study_service import build_study_detail_payload as build_study_detail_payload_service
 from store_metadata import init_database
 from translations import get_translation
 
@@ -214,16 +247,6 @@ EXPORT_DERIVED_DEPENDENCIES = {
     "injected_activity",
 }
 
-RADIOPHARM_MODALITIES = {
-    "PT",  # PET
-    "PET",
-    "NM",  # Nuclear medicine/SPECT
-    "SPECT",
-    "NM/CT",
-    "PET/CT",
-    "SPECT/CT",
-}
-
 EXPORT_DATE_FIELDS = {
     "patient_birth_date",
     "study_date",
@@ -313,83 +336,36 @@ def list_databanks() -> List[str]:
 
 
 def build_export_sections(translations: dict) -> tuple[List[dict], dict]:
-    sections = []
-    label_map = {}
-    for section in EXPORT_SECTIONS:
-        section_label = translations.get(
-            section.get("label_key"),
-            str(section.get("label_key", section.get("key", ""))).replace("_", " ").title()
-        )
-        fields = []
-        for field in section["fields"]:
-            field_name = field["name"]
-            label_key = field.get("label_key", field_name)
-            label = translations.get(label_key, label_key.replace("_", " ").title())
-            label_map[field_name] = label
-            fields.append({
-                "name": field_name,
-                "label": label,
-                "default": field.get("default", False),
-            })
-        sections.append({
-            "key": section["key"],
-            "label": section_label,
-            "fields": fields,
-        })
-    return sections, label_map
+    return build_export_sections_impl(translations, EXPORT_SECTIONS)
 
 
 def build_anonymize_fields(translations: dict) -> List[dict]:
-    fields = []
-    for field in ANONYMIZE_FIELDS:
-        field_name = field["name"]
-        label_key = field.get("label_key", field_name)
-        label = translations.get(label_key, label_key.replace("_", " ").title())
-        fields.append({
-            "name": field_name,
-            "label": label,
-            "default": field.get("default", False),
-        })
-    return fields
+    return build_anonymize_fields_impl(translations, ANONYMIZE_FIELDS)
 
 
 def resolve_export_fields(requested_fields: List[str]) -> List[str]:
-    selected_fields = [name for name in EXPORT_FIELD_ORDER if name in requested_fields]
-    if not selected_fields:
-        return list(EXPORT_DEFAULT_FIELDS)
-    return selected_fields
+    return resolve_export_fields_impl(requested_fields, EXPORT_FIELD_ORDER, EXPORT_DEFAULT_FIELDS)
 
 
 def resolve_csv_anonymize_fields(requested_fields: List[str], enabled: bool) -> List[str]:
-    if not enabled:
-        return []
-    requested_set = {name for name in requested_fields if name in ANONYMIZE_FIELD_ORDER}
-    selected_set = set(ANONYMIZE_DEFAULT_FIELDS) | requested_set
-    return [name for name in ANONYMIZE_FIELD_ORDER if name in selected_set]
+    return resolve_csv_anonymize_fields_impl(
+        requested_fields,
+        enabled,
+        ANONYMIZE_FIELD_ORDER,
+        ANONYMIZE_DEFAULT_FIELDS,
+    )
 
 
 def sanitize_filename(value: str, fallback: str = "export") -> str:
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value or "").strip("._")
-    return safe or fallback
+    return sanitize_filename_impl(value, fallback)
 
 
 def format_patient_name(value: Optional[object]) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if not text:
-        return ""
-    parts = [part for part in text.split("^") if part]
-    if len(parts) >= 2 and parts[0].lower() == "anonymous":
-        return f"{parts[0]} {parts[1]}".strip()
-    return " ".join(parts) if parts else text
+    return format_patient_name_impl(value)
 
 
 def is_radiopharm_modality(modality: Optional[object]) -> bool:
-    if not modality:
-        return False
-    value = str(modality).strip().upper()
-    return value in RADIOPHARM_MODALITIES
+    return is_radiopharm_modality_impl(modality)
 
 
 def format_number_with_unit(value: Optional[object], unit: Optional[str], decimals: int) -> str:
@@ -428,87 +404,13 @@ def format_dose_per_kg(value: Optional[float]) -> str:
 
 
 def format_export_value(field_name: str, row_dict: dict) -> str:
-    value = row_dict.get(field_name)
-    if value is None:
-        return ""
-    if field_name == "patient_name":
-        return format_patient_name(value)
-    if field_name in EXPORT_DATE_FIELDS:
-        return format_date(str(value))
-    if field_name in EXPORT_TIME_FIELDS:
-        return format_time(value)
-    if field_name == "injected_activity":
-        return format_injected_activity(value, row_dict.get("injected_activity_unit"))
-    if field_name == "radionuclide_total_dose":
-        return format_total_dose(value)
-    if field_name == "uptake_delay":
-        precomputed_delay = row_dict.get("uptake_delay") or row_dict.get("injection_delay")
-        if precomputed_delay:
-            return str(precomputed_delay)
-        fallback_date = (
-            row_dict.get("study_date")
-            or row_dict.get("acquisition_date")
-            or row_dict.get("series_date")
-        )
-        injection_date = (
-            row_dict.get("injection_date")
-            or row_dict.get("modality_injection_date")
-            or fallback_date
-        )
-        acquisition_date = (
-            row_dict.get("acquisition_date")
-            or row_dict.get("modality_acquisition_date")
-            or fallback_date
-        )
-        injection_time = (
-            row_dict.get("injection_time")
-            or row_dict.get("modality_injection_time")
-        )
-        acquisition_time = (
-            row_dict.get("acquisition_time")
-            or row_dict.get("series_time")
-        )
-        if injection_date and acquisition_date and injection_time and acquisition_time:
-            delay_minutes, _ = calculate_injection_delay(
-                injection_date,
-                injection_time,
-                acquisition_date,
-                acquisition_time,
-                injection_date_missing=(row_dict.get("injection_date") is None),
-                study_time=row_dict.get("study_time")
-            )
-            if delay_minutes and delay_minutes > 0:
-                return format_delay(delay_minutes)
-        return ""
-    if field_name == "dose_per_kg":
-        precomputed_dose = row_dict.get("dose_per_kg") or row_dict.get("activity_per_kg")
-        if isinstance(precomputed_dose, (int, float)):
-            return format_dose_per_kg(float(precomputed_dose))
-        if precomputed_dose:
-            return str(precomputed_dose)
-        patient_weight = get_patient_weight(row_dict)
-        injected_activity = parse_db_float(row_dict.get("injected_activity"))
-        if patient_weight and injected_activity:
-            activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
-            dose_per_kg = activity_mbq / patient_weight
-            if 0 < dose_per_kg < 100:
-                return format_dose_per_kg(dose_per_kg)
-        return ""
-    if field_name == "bmi":
-        patient_weight = parse_db_float(
-            row_dict.get("patient_weight") or row_dict.get("study_patient_weight")
-        )
-        patient_size = parse_db_float(
-            row_dict.get("patient_size") or row_dict.get("study_patient_size")
-        )
-        if patient_weight and patient_size and patient_size > 0:
-            bmi = patient_weight / (patient_size * patient_size)
-            return f"{bmi:.1f}"
-        return ""
-    if field_name in EXPORT_NUMERIC_FORMATS:
-        unit, decimals = EXPORT_NUMERIC_FORMATS[field_name]
-        return format_number_with_unit(value, unit, decimals)
-    return str(value)
+    return format_export_value_impl(
+        field_name,
+        row_dict,
+        export_date_fields=EXPORT_DATE_FIELDS,
+        export_time_fields=EXPORT_TIME_FIELDS,
+        export_numeric_formats=EXPORT_NUMERIC_FORMATS,
+    )
 
 
 def anonymize_export_value(
@@ -518,27 +420,59 @@ def anonymize_export_value(
     anonymize_cache: Dict[Tuple[str, str], str],
     anonymize_counts: Dict[str, int],
 ) -> str:
-    if field_name not in anonymize_fields:
-        return format_export_value(field_name, row_dict)
-    value = row_dict.get(field_name)
-    if value is None or str(value).strip() == "":
-        return ""
-    if field_name in ANONYMIZE_BLANK_FIELDS:
-        return ""
-    cache_key = (field_name, str(value))
-    cached = anonymize_cache.get(cache_key)
-    if cached is not None:
-        return cached
-    anonymize_counts[field_name] = anonymize_counts.get(field_name, 0) + 1
-    replacement = _generate_anonymized_value(field_name, anonymize_counts[field_name])
-    anonymize_cache[cache_key] = replacement
-    return replacement
+    return anonymize_export_value_impl(
+        field_name,
+        row_dict,
+        anonymize_fields,
+        anonymize_cache,
+        anonymize_counts,
+        anonymize_blank_fields=ANONYMIZE_BLANK_FIELDS,
+        export_date_fields=EXPORT_DATE_FIELDS,
+        export_time_fields=EXPORT_TIME_FIELDS,
+        export_numeric_formats=EXPORT_NUMERIC_FORMATS,
+    )
+
+
+def _resolve_export_query_fields(
+    selected_fields: List[str],
+    existing_columns: Optional[Set[str]] = None,
+) -> Tuple[List[str], List[str], bool]:
+    return resolve_export_query_fields_impl(
+        selected_fields,
+        EXPORT_DERIVED_FIELDS,
+        EXPORT_DERIVED_DEPENDENCIES,
+        existing_columns,
+    )
+
+
+def _write_csv_export_rows(
+    writer: csv.writer,
+    rows: List[sqlite3.Row],
+    selected_fields: List[str],
+    csv_anonymize_fields: Set[str],
+    *,
+    study_info: Optional[dict] = None,
+    sectioned: bool = False,
+    suppress_repeats: bool = False,
+) -> None:
+    return write_csv_export_rows_impl(
+        writer,
+        rows,
+        selected_fields,
+        csv_anonymize_fields,
+        export_group_clear_fields=EXPORT_GROUP_CLEAR_FIELDS,
+        anonymize_blank_fields=ANONYMIZE_BLANK_FIELDS,
+        export_date_fields=EXPORT_DATE_FIELDS,
+        export_time_fields=EXPORT_TIME_FIELDS,
+        export_numeric_formats=EXPORT_NUMERIC_FORMATS,
+        study_info=study_info,
+        sectioned=sectioned,
+        suppress_repeats=suppress_repeats,
+    )
 
 
 def _generate_anonymized_value(field_name: str, index: int) -> str:
-    prefix = re.sub(r"[^A-Za-z0-9]+", "", field_name).upper()[:10] or "FIELD"
-    token = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
-    return f"{prefix}_{index:04d}_{token}"
+    return generate_anonymized_value_impl(field_name, index)
 
 
 def _anonymize_column(conn: sqlite3.Connection, field_name: str) -> int:
@@ -757,64 +691,20 @@ def count_decimal_places(value: Optional[str]) -> int:
 
 def parse_db_float(value: Optional[object]) -> Optional[float]:
     """Coerce db values to float without throwing on non-numeric input."""
-    if value is None:
-        return None
-    try:
-        value = str(value).strip()
-    except Exception:
-        return None
-    if not value:
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
+    return shared_parse_db_float(value)
 
 
 def get_patient_weight(row_dict: dict) -> Optional[float]:
     """Return a usable patient weight, with a heuristic fallback."""
-    weight = parse_db_float(row_dict.get('patient_weight'))
-    if weight is not None and weight > 0:
-        return weight
-    weight = parse_db_float(row_dict.get('study_patient_weight'))
-    if weight is not None and weight > 0:
-        return weight
-    size_value = parse_db_float(row_dict.get('patient_size'))
-    # Some datasets store weight in the size field; only accept kg-like values.
-    if size_value is not None and size_value > 10 and size_value <= 500:
-        return size_value
-    return None
+    return shared_get_patient_weight(row_dict)
 
 
 def compute_delay_minutes(row_dict: dict) -> Optional[float]:
-    if (row_dict.get('injection_date') or row_dict.get('study_date')) and \
-       row_dict.get('injection_time') and \
-       (row_dict.get('acquisition_date') or row_dict.get('study_date')) and \
-       row_dict.get('acquisition_time'):
-        injection_date = row_dict.get('injection_date') or row_dict.get('study_date')
-        acquisition_date = row_dict.get('acquisition_date') or row_dict.get('study_date')
-        delay_minutes, _ = calculate_injection_delay(
-            injection_date,
-            row_dict['injection_time'],
-            acquisition_date,
-            row_dict['acquisition_time'],
-            injection_date_missing=(row_dict.get('injection_date') is None)
-        )
-        if delay_minutes and delay_minutes > 0:
-            return delay_minutes
-    return None
+    return shared_compute_delay_minutes(row_dict)
 
 
 def compute_dose_per_kg(row_dict: dict) -> Optional[float]:
-    study_weight = parse_db_float(row_dict.get('study_patient_weight'))
-    injected_activity = parse_db_float(row_dict.get('injected_activity'))
-    if study_weight is None or study_weight <= 0 or injected_activity is None:
-        return None
-    activity_per_kg = injected_activity / study_weight
-    dose_per_kg = activity_per_kg / 1e6 if activity_per_kg > 1e6 else activity_per_kg
-    if 0 < dose_per_kg < 100:
-        return dose_per_kg
-    return None
+    return shared_compute_dose_per_kg(row_dict)
 
 
 def compute_delay_status(row_dict: dict) -> Tuple[Optional[float], str]:
@@ -857,13 +747,7 @@ def compute_delay_status(row_dict: dict) -> Tuple[Optional[float], str]:
 
 
 def compute_dose_from_row(row_dict: dict) -> Tuple[Optional[float], Optional[float]]:
-    patient_weight = get_patient_weight(row_dict)
-    injected_activity = parse_db_float(row_dict.get('injected_activity'))
-    if not patient_weight or patient_weight <= 0 or injected_activity is None:
-        return None, None
-    activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
-    dose_per_kg = activity_mbq / patient_weight if patient_weight else None
-    return dose_per_kg, activity_mbq
+    return shared_compute_dose_from_row(row_dict)
 
 
 def has_radiopharm(row_dict: dict) -> bool:
@@ -883,30 +767,7 @@ def has_time_conflict(row_dict: dict, tolerance_minutes: int = 120) -> bool:
 
 
 def select_study_representatives(rows):
-    representatives = {}
-    for row in rows:
-        row_dict = dict(row)
-        study_uid = row_dict.get('study_instance_uid')
-        if not study_uid:
-            continue
-        delay_minutes = compute_delay_minutes(row_dict)
-        dose_per_kg = compute_dose_per_kg(row_dict)
-        score = 0
-        if dose_per_kg is not None:
-            score += 3
-        if delay_minutes is not None:
-            score += 2
-        if is_radiopharm_modality(row_dict.get('modality') or ''):
-            score += 1
-        current = representatives.get(study_uid)
-        if current is None or score > current["score"]:
-            representatives[study_uid] = {
-                "score": score,
-                "row": row_dict,
-                "delay_minutes": delay_minutes,
-                "dose_per_kg": dose_per_kg
-            }
-    return representatives
+    return shared_select_study_representatives(rows)
 
 
 def load_representative_series(conn: sqlite3.Connection) -> Tuple[Dict[str, dict], List[dict]]:
@@ -966,23 +827,20 @@ def load_representative_series(conn: sqlite3.Connection) -> Tuple[Dict[str, dict
     return representative_map, representative_series_rows
 
 
+def _load_private_tag_items(
+    conn: sqlite3.Connection,
+    series_uids: List[str],
+    classification: str,
+) -> Dict[str, List[dict]]:
+    from study_service import _load_private_tag_items as load_private_tag_items_impl
+
+    return load_private_tag_items_impl(conn, series_uids, classification)
+
+
 def resolve_display_path(scan_root: Optional[str], file_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    if not file_path:
-        return None, None
-    try:
-        path = Path(file_path)
-        if path.is_absolute():
-            return str(path), None
-    except Exception:
-        return None, None
-    if scan_root and scan_root.startswith("zip:"):
-        zip_name = scan_root.split("zip:", 1)[1]
-        display_path = str(Path(zip_name) / file_path)
-        label = f"Extracted from uploaded zip file: {zip_name}"
-        return display_path, label
-    if scan_root:
-        return str(Path(scan_root) / file_path), None
-    return None, None
+    from study_service import resolve_display_path as resolve_display_path_impl
+
+    return resolve_display_path_impl(scan_root, file_path)
 
 
 def fuzzy_match(text1, text2, threshold=0.6):
@@ -1615,278 +1473,11 @@ def index():
 
 
 def _build_study_detail_payload(conn: sqlite3.Connection, study_uid: str) -> Optional[dict]:
-    cursor = conn.execute("""
-        SELECT
-            study_instance_uid,
-            MAX(patient_id) as patient_id,
-            MAX(patient_name) as patient_name,
-            MAX(patient_birth_date) as patient_birth_date,
-            MAX(patient_sex) as patient_sex,
-            MAX(patient_age) as patient_age,
-            MAX(patient_weight) as patient_weight,
-            MAX(patient_size) as patient_size,
-            MAX(study_date) as study_date,
-            MAX(study_time) as study_time,
-            MAX(acquisition_date) as acquisition_date,
-            MAX(acquisition_time) as acquisition_time,
-            MAX(study_description) as study_description,
-            MAX(study_id) as study_id,
-            MAX(accession_number) as accession_number,
-            MAX(referring_physician_name) as referring_physician_name,
-            MAX(manufacturer) as manufacturer,
-            MAX(manufacturer_model_name) as manufacturer_model_name,
-            MAX(institution_name) as institution_name,
-            MAX(ctp_collection) as ctp_collection,
-            MAX(ctp_subject_id) as ctp_subject_id,
-            MAX(ctp_private_flag_raw) as ctp_private_flag_raw,
-            MAX(ctp_private_flag_int) as ctp_private_flag_int,
-            MAX(csa_image_header_json) as csa_image_header_json,
-            MAX(csa_series_header_json) as csa_series_header_json,
-            MAX(csa_image_header_hash) as csa_image_header_hash,
-            MAX(csa_series_header_hash) as csa_series_header_hash
-        FROM dicom_metadata
-        WHERE study_instance_uid = ?
-        GROUP BY study_instance_uid
-    """, (study_uid,))
-    study_row = cursor.fetchone()
-    if not study_row:
-        return None
-    study_info = dict(study_row)
-
-    cursor = conn.execute("""
-        SELECT
-            series_instance_uid,
-            series_number,
-            series_description,
-            series_date,
-            series_time,
-            modality,
-            scan_root,
-            body_part_examined,
-            protocol_name,
-            acquisition_date,
-            acquisition_time,
-            patient_position,
-            scanning_sequence,
-            sequence_variant,
-            scan_options,
-            acquisition_type,
-            injection_time,
-            injection_date,
-            injected_activity,
-            radiopharmaceutical,
-            half_life,
-            decay_correction,
-            radiopharmaceutical_volume,
-            radionuclide_total_dose,
-            image_type,
-            pixel_spacing,
-            slice_thickness,
-            reconstruction_diameter,
-            reconstruction_algorithm,
-            convolution_kernel,
-            filter_type,
-            spiral_pitch_factor,
-            ctdivol,
-            dlp,
-            manufacturer,
-            manufacturer_model_name,
-            software_version,
-            station_name,
-            csa_image_header_json,
-            csa_series_header_json,
-            csa_image_header_hash,
-            csa_series_header_hash,
-            private_payload_fingerprint,
-            image_orientation_patient,
-            slice_location,
-            number_of_frames,
-            frame_time,
-            number_of_slices,
-            file_path
-        FROM dicom_metadata
-        WHERE study_instance_uid = ?
-        ORDER BY series_number ASC, series_time ASC, series_instance_uid ASC
-    """, (study_uid,))
-    series = [dict(row) for row in cursor.fetchall()]
-
-    study_paths = set()
-    study_labels = set()
-    for item in series:
-        abs_path, path_label = resolve_display_path(item.get("scan_root"), item.get("file_path"))
-        if abs_path:
-            item["absolute_file_path"] = abs_path
-            study_paths.add(abs_path)
-        if path_label:
-            item["absolute_path_label"] = path_label
-            study_labels.add(path_label)
-
-    if study_paths:
-        try:
-            common_root = os.path.commonpath(sorted(study_paths))
-        except ValueError:
-            common_root = None
-        study_info["study_absolute_paths"] = [common_root] if common_root else sorted(study_paths)
-    else:
-        study_info["study_absolute_paths"] = []
-    study_info["study_absolute_path_labels"] = sorted(study_labels)
-
-    export_modalities = sorted({item.get("modality") for item in series if item.get("modality")})
-    series_uids = [item.get("series_instance_uid") for item in series if item.get("series_instance_uid")]
-    private_creators: Dict[str, dict] = {}
-    pipeline_tags: Dict[str, List[dict]] = {}
-    rt_tags: Dict[str, List[dict]] = {}
-    pet_dose_reports: Dict[str, List[dict]] = {}
-
-    if series_uids:
-        placeholders = ",".join(["?"] * len(series_uids))
-        cursor = conn.execute(
-            f"""
-            SELECT series_instance_uid, creator, COUNT(*) as tag_count
-            FROM private_tag
-            WHERE series_instance_uid IN ({placeholders})
-            GROUP BY series_instance_uid, creator
-            """,
-            series_uids,
-        )
-        for row in cursor.fetchall():
-            private_creators.setdefault(row["series_instance_uid"], {})[row["creator"]] = row["tag_count"]
-
-        cursor = conn.execute(
-            f"""
-            SELECT series_instance_uid, creator, group_hex, element_hex, value_text, value_num, value_hex
-            FROM private_tag
-            WHERE series_instance_uid IN ({placeholders})
-              AND classification = 'pipeline_provenance'
-            ORDER BY series_instance_uid, creator, group_hex, element_hex
-            """,
-            series_uids,
-        )
-        for row in cursor.fetchall():
-            item = dict(row)
-            raw_value = item.get("value_text")
-            if raw_value is None and item.get("value_num") is not None:
-                raw_value = str(item["value_num"])
-            formatted = format_private_timestamp(raw_value) if raw_value else None
-            item["display_value"] = formatted or raw_value or item.get("value_hex")
-            pipeline_tags.setdefault(item["series_instance_uid"], []).append(item)
-
-        cursor = conn.execute(
-            f"""
-            SELECT series_instance_uid, creator, group_hex, element_hex, value_text, value_num, value_hex
-            FROM private_tag
-            WHERE series_instance_uid IN ({placeholders})
-              AND classification = 'rt_provenance'
-            ORDER BY series_instance_uid, creator, group_hex, element_hex
-            """,
-            series_uids,
-        )
-        for row in cursor.fetchall():
-            item = dict(row)
-            raw_value = item.get("value_text")
-            if raw_value is None and item.get("value_num") is not None:
-                raw_value = str(item["value_num"])
-            formatted = format_private_timestamp(raw_value) if raw_value else None
-            item["display_value"] = formatted or raw_value or item.get("value_hex")
-            rt_tags.setdefault(item["series_instance_uid"], []).append(item)
-
-        cursor = conn.execute(
-            f"""
-            SELECT series_instance_uid, value_text
-            FROM private_tag
-            WHERE series_instance_uid IN ({placeholders})
-              AND creator = 'SIEMENS CSA HEADER'
-              AND value_text LIKE '%<PetDoseReportData%'
-            """,
-            series_uids,
-        )
-        for row in cursor.fetchall():
-            entries = parse_pet_dose_report(row["value_text"])
-            if entries:
-                pet_dose_reports[row["series_instance_uid"]] = entries
-
-    if study_info.get("study_date"):
-        study_info["study_date_formatted"] = format_date(study_info["study_date"])
-    if study_info.get("study_time"):
-        study_info["study_time_formatted"] = format_time(study_info["study_time"])
-    if study_info.get("patient_birth_date"):
-        study_info["patient_birth_date_formatted"] = format_date(study_info["patient_birth_date"])
-    study_info["patient_name_display"] = format_patient_name(study_info.get("patient_name")) or None
-
-    if study_info.get("patient_weight") and study_info.get("patient_size"):
-        height_m = study_info["patient_size"]
-        if height_m and height_m > 0:
-            study_info["bmi"] = study_info["patient_weight"] / (height_m * height_m)
-            study_info["height_cm"] = height_m * 100
-
-    for item in series:
-        creator_counts = private_creators.get(item.get("series_instance_uid"), {})
-        item["private_creators"] = dict(sorted(creator_counts.items(), key=lambda x: x[1], reverse=True))
-        item["pipeline_provenance"] = pipeline_tags.get(item.get("series_instance_uid"), [])
-        item["rt_provenance"] = rt_tags.get(item.get("series_instance_uid"), [])
-        item["pet_dose_report"] = pet_dose_reports.get(item.get("series_instance_uid"))
-
-        if item.get("series_date"):
-            item["series_date_formatted"] = format_date(item["series_date"])
-        if item.get("series_time"):
-            item["series_time_formatted"] = format_time(item["series_time"])
-        if item.get("acquisition_date"):
-            item["acquisition_date_formatted"] = format_date(item["acquisition_date"])
-        if item.get("acquisition_time"):
-            item["acquisition_time_formatted"] = format_time(item["acquisition_time"])
-            if study_info.get("study_time"):
-                try:
-                    study_hours = int(str(study_info["study_time"])[:2])
-                    acq_hours = int(str(item["acquisition_time"])[:2])
-                    if study_hours >= 22 and acq_hours <= 6:
-                        item["acquisition_likely_next_day"] = True
-                except (TypeError, ValueError):
-                    pass
-        if item.get("injection_date"):
-            item["injection_date_formatted"] = format_date(item["injection_date"])
-        if item.get("injection_time"):
-            item["injection_time_formatted"] = format_time(item["injection_time"])
-
-        injection_date_to_use = item.get("injection_date") or study_info.get("study_date")
-        acquisition_date_to_use = item.get("acquisition_date") or study_info.get("study_date")
-        if (
-            injection_date_to_use and item.get("injection_time")
-            and acquisition_date_to_use and item.get("acquisition_time")
-        ):
-            delay_minutes, _ = calculate_injection_delay(
-                injection_date_to_use,
-                item["injection_time"],
-                acquisition_date_to_use,
-                item["acquisition_time"],
-                injection_date_missing=(item.get("injection_date") is None),
-                study_time=study_info.get("study_time"),
-            )
-            if delay_minutes:
-                item["injection_delay"] = format_delay(delay_minutes)
-                item["injection_delay_minutes"] = delay_minutes
-
-        if item.get("injected_activity") and study_info.get("patient_weight"):
-            item["activity_per_kg"] = item["injected_activity"] / study_info["patient_weight"]
-
-        if item.get("injected_activity") and item.get("half_life") and item.get("injection_delay_minutes"):
-            injected_activity_bq = item["injected_activity"]
-            if injected_activity_bq < 1e6:
-                injected_activity_bq = injected_activity_bq * 1e6
-            remaining_activity = calculate_activity_at_scan(
-                injected_activity_bq,
-                item["half_life"],
-                item["injection_delay_minutes"],
-            )
-            if remaining_activity:
-                item["activity_at_scan"] = remaining_activity
-                if injected_activity_bq > 0:
-                    item["decay_percent"] = (1 - remaining_activity / injected_activity_bq) * 100
-
-    return {
-        "study_info": study_info,
-        "series": series,
-        "export_modalities": export_modalities,
-    }
+    return build_study_detail_payload_service(
+        conn,
+        study_uid,
+        calculate_activity_at_scan=calculate_activity_at_scan,
+    )
 
 
 @app.route('/study/<study_uid>')
@@ -1951,13 +1542,9 @@ def export_study_csv(study_uid):
 
     translations = get_translations()
     _, label_map = build_export_sections(translations)
-    header = [label_map.get(name, name) for name in selected_fields]
-
     conn = get_db_connection(db_path)
-    derived_selected = any(field in EXPORT_DERIVED_FIELDS for field in selected_fields)
-    extra_fields = sorted(EXPORT_DERIVED_DEPENDENCIES) if derived_selected else []
-    real_fields = [field for field in selected_fields if field not in EXPORT_DERIVED_FIELDS]
-    select_fields = list(dict.fromkeys(real_fields + extra_fields))
+    export_fields, select_fields, _derived_selected = _resolve_export_query_fields(selected_fields)
+    header = [label_map.get(name, name) for name in export_fields]
     select_exprs = [f"s.{field}" for field in select_fields] if select_fields else ["s.study_instance_uid"]
     column_list = ", ".join(select_exprs)
     modality_filters = [m.strip() for m in request.args.getlist('modality') if m.strip()]
@@ -1995,76 +1582,15 @@ def export_study_csv(study_uid):
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(header)
-    last_group_values = {}
-    anonymize_cache: Dict[Tuple[str, str], str] = {}
-    anonymize_counts: Dict[str, int] = {}
-    if sectioned:
-        patient_fields = [f for f in selected_fields if f in EXPORT_GROUP_CLEAR_FIELDS]
-        if patient_fields:
-            base_row = dict(rows[0]) if rows else {}
-            base_row["study_patient_weight"] = study_info.get("patient_weight")
-            base_row["study_patient_size"] = study_info.get("patient_size")
-            patient_row = {name: "" for name in selected_fields}
-            for name in patient_fields:
-                if name == "bmi":
-                    patient_weight = parse_db_float(base_row.get("study_patient_weight"))
-                    patient_size = parse_db_float(base_row.get("study_patient_size"))
-                    if patient_weight and patient_size and patient_size > 0:
-                        patient_row[name] = f"{(patient_weight / (patient_size * patient_size)):.1f}"
-                        continue
-                patient_row[name] = anonymize_export_value(
-                    name, base_row, csv_anonymize_fields, anonymize_cache, anonymize_counts
-                )
-            writer.writerow([patient_row.get(name, "") for name in selected_fields])
-            writer.writerow([])
-    for index, row in enumerate(rows):
-        row_dict = dict(row)
-        row_dict["study_patient_weight"] = study_info.get("patient_weight")
-        row_dict["study_patient_size"] = study_info.get("patient_size")
-        if derived_selected:
-            injection_date_to_use = row_dict.get("injection_date") or study_info.get("study_date")
-            acquisition_date_to_use = row_dict.get("acquisition_date") or study_info.get("study_date")
-            if (injection_date_to_use and row_dict.get("injection_time")
-                    and acquisition_date_to_use and row_dict.get("acquisition_time")):
-                delay_minutes, _ = calculate_injection_delay(
-                    injection_date_to_use,
-                    row_dict["injection_time"],
-                    acquisition_date_to_use,
-                    row_dict["acquisition_time"],
-                    injection_date_missing=(row_dict.get("injection_date") is None),
-                    study_time=study_info.get("study_time")
-                )
-                if delay_minutes:
-                    row_dict["uptake_delay"] = format_delay(delay_minutes)
-            injected_activity = parse_db_float(row_dict.get("injected_activity"))
-            patient_weight = get_patient_weight(row_dict)
-            if injected_activity and patient_weight:
-                activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
-                dose_per_kg = activity_mbq / patient_weight
-                if 0 < dose_per_kg < 100:
-                    row_dict["dose_per_kg"] = dose_per_kg
-            patient_size = parse_db_float(
-                row_dict.get("patient_size") or study_info.get("patient_size")
-            )
-            if patient_weight and patient_size and patient_size > 0:
-                row_dict["bmi"] = patient_weight / (patient_size * patient_size)
-        formatted_row = {
-            name: anonymize_export_value(
-                name, row_dict, csv_anonymize_fields, anonymize_cache, anonymize_counts
-            )
-            for name in selected_fields
-        }
-        if sectioned:
-            for field_name in EXPORT_GROUP_CLEAR_FIELDS:
-                if field_name in formatted_row:
-                    formatted_row[field_name] = ""
-        if suppress_repeats and index > 0:
-            for field_name in EXPORT_GROUP_CLEAR_FIELDS:
-                if field_name in formatted_row and formatted_row[field_name] == last_group_values.get(field_name):
-                    formatted_row[field_name] = ""
-        if index == 0:
-            last_group_values = formatted_row.copy()
-        writer.writerow([formatted_row.get(name, "") for name in selected_fields])
+    _write_csv_export_rows(
+        writer,
+        rows,
+        export_fields,
+        csv_anonymize_fields,
+        study_info=study_info,
+        sectioned=sectioned,
+        suppress_repeats=suppress_repeats,
+    )
 
     conn = get_db_connection(db_path)
     cursor = conn.execute(
@@ -2104,21 +1630,10 @@ def export_databank_csv():
     try:
         cursor = conn.execute("PRAGMA table_info(dicom_metadata)")
         existing_columns = {str(row[1]) for row in cursor.fetchall()}
-
-        derived_selected = any(field in EXPORT_DERIVED_FIELDS for field in selected_fields)
-        extra_fields = [
-            field for field in sorted(EXPORT_DERIVED_DEPENDENCIES)
-            if field in existing_columns
-        ] if derived_selected else []
-        real_fields = [
-            field for field in selected_fields
-            if field not in EXPORT_DERIVED_FIELDS and field in existing_columns
-        ]
-        export_fields = [
-            field for field in selected_fields
-            if field in EXPORT_DERIVED_FIELDS or field in existing_columns
-        ]
-        select_fields = list(dict.fromkeys(real_fields + extra_fields))
+        export_fields, select_fields, _derived_selected = _resolve_export_query_fields(
+            selected_fields,
+            existing_columns,
+        )
         select_exprs = [f'"{field}"' for field in select_fields] if select_fields else ['id']
         column_list = ", ".join(select_exprs)
 
@@ -2133,27 +1648,7 @@ def export_databank_csv():
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow([label_map.get(name, name) for name in export_fields])
-        anonymize_cache: Dict[Tuple[str, str], str] = {}
-        anonymize_counts: Dict[str, int] = {}
-        for row in rows:
-            row_dict = dict(row)
-            if derived_selected:
-                patient_weight = get_patient_weight(row_dict)
-                injected_activity = parse_db_float(row_dict.get("injected_activity"))
-                if patient_weight and injected_activity:
-                    activity_mbq = injected_activity / 1e6 if injected_activity > 1e6 else injected_activity
-                    dose_per_kg = activity_mbq / patient_weight
-                    if 0 < dose_per_kg < 100:
-                        row_dict["dose_per_kg"] = dose_per_kg
-                patient_size = parse_db_float(row_dict.get("patient_size"))
-                if patient_weight and patient_size and patient_size > 0:
-                    row_dict["bmi"] = patient_weight / (patient_size * patient_size)
-            writer.writerow([
-                anonymize_export_value(
-                    name, row_dict, csv_anonymize_fields, anonymize_cache, anonymize_counts
-                )
-                for name in export_fields
-            ])
+        _write_csv_export_rows(writer, rows, export_fields, csv_anonymize_fields)
     finally:
         conn.close()
 
@@ -2837,6 +2332,25 @@ def _build_dashboard_payload(
     }
 
 
+def _build_dashboard_payload(
+    study_summary: List[dict],
+    study_modalities: Dict[str, set],
+    representative_series_rows: List[dict],
+    db_path: str,
+) -> dict:
+    return build_dashboard_payload_service(
+        study_summary=study_summary,
+        study_modalities=study_modalities,
+        representative_series_rows=representative_series_rows,
+        db_path=db_path,
+        parse_time_to_24hour=parse_time_to_24hour,
+        calculate_injection_delay=calculate_injection_delay,
+        compute_delay_status=compute_delay_status,
+        has_time_conflict=has_time_conflict,
+        has_radiopharm=has_radiopharm,
+    )
+
+
 @app.route('/dashboard')
 def dashboard():
     """Analytics dashboard showing protocol adherence and distributions"""
@@ -3047,24 +2561,7 @@ def parse_time_to_24hour(time_str):
 
     Returns: (hour, minute, second) tuple in 24-hour format, or None if parsing fails
     """
-    if not time_str:
-        return None
-    try:
-        time_str = str(time_str).strip()
-
-        # Remove fractional seconds for parsing
-        if '.' in time_str:
-            time_str = time_str.split('.')[0]
-
-        if len(time_str) >= 6:
-            hours = int(time_str[:2])
-            minutes = int(time_str[2:4])
-            seconds = int(time_str[4:6]) if len(time_str) >= 6 else 0
-
-            return (hours, minutes, seconds)
-    except Exception:
-        return None
-    return None
+    return shared_parse_time_to_24hour(time_str)
 
 
 def parse_time_to_seconds(time_str):
@@ -3109,45 +2606,15 @@ def calculate_injection_delay(injection_date, injection_time, acquisition_date, 
 
     This version ships raw DICOM times without applying any time correction heuristics.
     """
-    if not injection_date or not injection_time or not acquisition_date or not acquisition_time:
+    delay_minutes = calculate_raw_injection_delay_minutes(
+        injection_date,
+        injection_time,
+        acquisition_date,
+        acquisition_time,
+    )
+    if delay_minutes is None or delay_minutes < 0:
         return None, None
-
-    try:
-
-        inj_date_str = str(injection_date).strip()
-        acq_date_str = str(acquisition_date).strip()
-
-        if len(inj_date_str) < 8 or len(acq_date_str) < 8:
-            return None, None
-
-        inj_time_parsed = parse_time_to_24hour(injection_time)
-        acq_time_parsed = parse_time_to_24hour(acquisition_time)
-
-        if not inj_time_parsed or not acq_time_parsed:
-            return None, None
-
-        inj_year = int(inj_date_str[:4])
-        inj_month = int(inj_date_str[4:6])
-        inj_day = int(inj_date_str[6:8])
-        inj_hour, inj_min, inj_sec = inj_time_parsed
-
-        acq_year = int(acq_date_str[:4])
-        acq_month = int(acq_date_str[4:6])
-        acq_day = int(acq_date_str[6:8])
-        acq_hour, acq_min, acq_sec = acq_time_parsed
-
-        injection_dt = datetime(inj_year, inj_month, inj_day, inj_hour, inj_min, inj_sec)
-        acquisition_dt = datetime(acq_year, acq_month, acq_day, acq_hour, acq_min, acq_sec)
-
-        delay = acquisition_dt - injection_dt
-        delay_minutes = delay.total_seconds() / 60
-
-        if delay_minutes < 0:
-            return None, None
-
-        return delay_minutes, None
-    except Exception:
-        return None, None
+    return delay_minutes, None
 
 
 def calculate_patient_age(birth_date, study_date):
@@ -3186,22 +2653,40 @@ def calculate_activity_at_scan(injected_activity, half_life_seconds, delay_minut
         return None
 
 
+def format_date(date_str):
+    """Format DICOM date (YYYYMMDD) to DD/MM/YYYY format"""
+    return format_date_impl(date_str)
+
+
+def format_time(time_str):
+    """Format DICOM time (HHMMSS.frac) to human-readable format (HH:MM:SS)"""
+    return format_time_impl(time_str)
+
+
+def format_private_timestamp(value_text: Optional[object]) -> Optional[str]:
+    """Best-effort formatting for private-tag timestamps."""
+    return format_private_timestamp_impl(value_text)
+
+
+def parse_pet_dose_report(xml_text: str) -> Optional[List[dict]]:
+    return parse_pet_dose_report_impl(xml_text)
+
+
+def calculate_injection_delay(injection_date, injection_time, acquisition_date, acquisition_time, injection_date_missing=False, study_time=None):
+    """Calculate delay between injection and acquisition in minutes."""
+    return calculate_injection_delay_impl(
+        injection_date,
+        injection_time,
+        acquisition_date,
+        acquisition_time,
+        injection_date_missing=injection_date_missing,
+        study_time=study_time,
+    )
+
+
 def format_delay(minutes):
     """Format delay in minutes to human-readable format"""
-    if minutes is None:
-        return None
-
-    try:
-        if minutes < 60:
-            return f"{minutes:.1f} minutes"
-        elif minutes < 1440:  # Less than 24 hours
-            hours = minutes / 60
-            return f"{hours:.1f} hours ({minutes:.0f} min)"
-        else:
-            days = minutes / 1440
-            return f"{days:.1f} days ({minutes:.0f} min)"
-    except Exception:
-        return None
+    return format_delay_impl(minutes)
 
 
 if __name__ == '__main__':

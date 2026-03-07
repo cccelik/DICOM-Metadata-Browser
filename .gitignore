@@ -6,6 +6,10 @@
 !webui.py
 !extract_one_per_series.py
 !dicom_discovery.py
+!qa_utils.py
+!export_utils.py
+!study_service.py
+!dashboard_service.py
 !pyproject.toml
 !.flake8
 !requirements.txt
