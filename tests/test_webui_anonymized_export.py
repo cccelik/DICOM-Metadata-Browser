@@ -269,6 +269,32 @@ class WebUiAnonymizedExportTests(unittest.TestCase):
                 self.assertEqual(rows[1][1], "")
                 response.close()
 
+    def test_export_csv_uses_lang_query_over_session_language(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_dir = Path(td)
+            db_path = db_dir / "sample.db"
+            conn = store_metadata.init_database(str(db_path), optimize=False)
+            conn.execute(
+                """
+                INSERT INTO dicom_metadata (
+                    patient_name, patient_id, study_instance_uid, series_instance_uid, sop_instance_uid
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                ("Max^Mustermann", "PAT-001", "STUDY-1", "SERIES-1", "SOP-1"),
+            )
+            conn.commit()
+            conn.close()
+
+            with patch.object(webui, "DATABANK_DIR", db_dir):
+                client = webui.app.test_client()
+                with client.session_transaction() as session:
+                    session["language"] = "en"
+                response = client.get("/databanks/export.csv?db=sample.db&lang=de&fields=patient_name")
+                self.assertEqual(response.status_code, 200, response.status)
+                rows = list(reader(StringIO(response.data.decode("utf-8"))))
+                self.assertEqual(rows[0], ["Patientenname"])
+                response.close()
+
 
 if __name__ == "__main__":
     unittest.main()

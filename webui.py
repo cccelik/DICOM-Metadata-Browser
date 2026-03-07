@@ -638,8 +638,14 @@ def export_anonymized_databank():
 
 
 def get_language():
-    """Get current language from session or request, default to English"""
-    return session.get('language', request.args.get('lang', 'en'))
+    """Get current language from request or session, default to English."""
+    request_lang = request.args.get('lang')
+    if request_lang in {'en', 'de'}:
+        return request_lang
+    session_lang = session.get('language')
+    if session_lang in {'en', 'de'}:
+        return session_lang
+    return 'en'
 
 
 def get_translations():

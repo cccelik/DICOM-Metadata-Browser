@@ -32,6 +32,13 @@
                     <span>{{ t.export_csv_anonymize or 'Anonymize CSV export' }}</span>
                 </label>
             </div>
+            <div class="export-modal-actions" style="justify-content: flex-start; align-items: center; gap: 12px;">
+                <label for="export-language" style="font-weight: 600;">{{ t.export_language or 'Export language' }}</label>
+                <select id="export-language" class="export-small-button" style="min-width: 140px;">
+                    <option value="en" {% if lang == 'en' %}selected{% endif %}>{{ t.language_english or 'English' }}</option>
+                    <option value="de" {% if lang == 'de' %}selected{% endif %}>{{ t.language_german or 'German' }}</option>
+                </select>
+            </div>
             <div class="export-sections">
                 {% for section in export_sections %}
                 <div class="export-section">

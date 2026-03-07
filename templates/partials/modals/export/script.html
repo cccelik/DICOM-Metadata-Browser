@@ -16,6 +16,7 @@
     const exportAnonymizeFields = Array.from(document.querySelectorAll('.export-anonymize-field-toggle'));
     const exportAnonymizeAll = document.getElementById('export-anonymize-all');
     const exportAnonymizeNone = document.getElementById('export-anonymize-none');
+    const exportLanguage = document.getElementById('export-language');
 
     function openExportModal() {
         if (!exportModal) {
@@ -136,7 +137,7 @@
             }
             const params = new URLSearchParams();
             params.set('db', '{{ db_name }}');
-            params.set('lang', '{{ lang }}');
+            params.set('lang', exportLanguage ? exportLanguage.value : '{{ lang }}');
             selectedFields.forEach(field => params.append('fields', field));
             if (anonymizeEnabled) {
                 params.set('anonymize', '1');
