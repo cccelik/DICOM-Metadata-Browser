@@ -43,10 +43,10 @@ python3 process_dicom.py <FILTERED_DIR_X> <REPEAT_DB_X> --no-subdirs --timing --
 \section{Automated Test Execution Commands}
 The implemented automated test suite can be executed locally with:
 \begin{lstlisting}[breaklines=true,basicstyle=\ttfamily\small]
-python3 -m unittest discover -s tests -v
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests
 \end{lstlisting}
 
-The suite currently contains 58 tests spanning discovery, extraction helpers, processing helpers, storage integration, and anonymized export/web utility behavior.
+The suite currently contains 71 tests spanning discovery, extraction helpers, processing helpers, storage integration, study-service logic, dashboard-service logic, and anonymized export/web utility behavior.
 
 \section{Continuous Integration Configuration}
 Regression checks are also executed in GitHub Actions using:
@@ -54,7 +54,7 @@ Regression checks are also executed in GitHub Actions using:
 .github/workflows/tests.yml
 \end{lstlisting}
 
-The workflow runs on push and pull-request events, installs project requirements, and executes the same unittest discovery command.
+The workflow runs on push and pull-request events, installs project requirements, and executes the same regression suite through automated CI.
 
 \chapter{Supplementary Evaluation Notes}
 Values in Chapter 4 are environment-specific baselines and should be interpreted comparatively. For publication-grade benchmarking, keep controlled system load, fixed worker settings, and repeated measurements with variance reporting.
@@ -78,7 +78,8 @@ All project materials used in this thesis are maintained in the GitHub repositor
 
 The repository contains:
 \begin{itemize}
-\item source modules such as \path{process_dicom.py}, \path{extract_metadata.py}, \path{store_metadata.py}, and \path{webui.py},
+\item root entry points such as \path{process_dicom.py}, \path{extract\_one\_per\_series.py}, and \path{webui.py},
+\item reusable application modules under \path{dicom_browser/},
 \item the automated test suite under \path{tests/},
 \item CI workflow definitions under \path{.github/workflows/}.
 \item the thesis report sources and generated document under \texttt{Efficient Data Access and Storage Optimization for}\linebreak[1]\texttt{ PET:CT Imaging Data/}.

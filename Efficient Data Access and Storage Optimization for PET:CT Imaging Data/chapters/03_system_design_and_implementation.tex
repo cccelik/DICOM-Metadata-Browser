@@ -106,7 +106,7 @@ The web layer provides study listings, detail views, quality dashboards, and exp
 The interaction model supports iterative use: ingest data, inspect quality, refine filters, and export subsets without leaving the same environment.
 
 \section{Detailed Implementation}
-The implementation is organized around five primary modules. \texttt{dicom\_discovery.py} implements shared candidate logic. \texttt{extract\_metadata.py} defines field extraction, private-tag handling, and parallel extraction APIs. \texttt{store\_metadata.py} provides schema definitions, migrations, and insertion logic. \texttt{process\_dicom.py} orchestrates full runs including archive handling and representative marking. \texttt{webui.py} implements user-facing routes and query logic.
+The current implementation separates user-facing entry points from reusable internal modules. The root-level entry points are \texttt{process\_dicom.py}, \texttt{extract\_one\_per\_series.py}, and \texttt{webui.py}. Reusable application logic resides in the \texttt{dicom\_browser} package, which contains discovery, extraction, storage, export, dashboard, study-detail, translation, and QA helper modules. This structure keeps operational commands simple while reducing code duplication inside the implementation.
 
 Implementation quality is supported through explicit function boundaries, centralized helper utilities, and defensive handling of common failure modes. The codebase favors clear defaults and robust parsing over assumptions about repository cleanliness.
 
@@ -115,16 +115,20 @@ Because this thesis is evaluated as a software systems project, script-level res
 
 \begin{table}[htbp]
 \centering
-\caption{Major project scripts and their functional purpose.}
+\caption{Major project entry points and internal modules with their functional purpose.}
 \label{tab:script-matrix}
 \small
 \begin{tabular}{p{0.24\textwidth}p{0.30\textwidth}p{0.38\textwidth}}
 \toprule
-Script & Purpose & Workflow Role \\
+Component & Purpose & Workflow Role \\
 \midrule
-\texttt{dicom\_discovery} & Candidate detection and artifact filtering for heterogeneous file trees. & Shared discovery primitive used by ingestion utilities to ensure consistent file coverage. \\
-\texttt{extract\_metadata} & Metadata-only parsing, private-tag extraction, and parallel extraction API. & Core extraction engine used for performance and quality evaluation. \\
-\texttt{store\_metadata} & SQLite schema initialization, migration handling, insertion, and dedup constraints. & Persistence layer implementing normalized storage and rerun safety. \\
+\makecell[l]{\texttt{dicom\_browser.}\\\texttt{dicom\_discovery}} & Candidate detection and artifact filtering for heterogeneous file trees. & Shared discovery primitive used by ingestion utilities to ensure consistent file coverage. \\
+\makecell[l]{\texttt{dicom\_browser.}\\\texttt{extract\_metadata}} & Metadata-only parsing, private-tag extraction, and parallel extraction API. & Core extraction engine used for performance and quality evaluation. \\
+\makecell[l]{\texttt{dicom\_browser.}\\\texttt{store\_metadata}} & SQLite schema initialization, migration handling, insertion, and dedup constraints. & Persistence layer implementing normalized storage and rerun safety. \\
+\makecell[l]{\texttt{dicom\_browser.}\\\texttt{qa\_utils}} & Shared helper logic for representative-series scoring, dose calculations, and timing derivation. & Keeps ingestion-time and web-layer QA logic behaviorally aligned. \\
+\makecell[l]{\texttt{dicom\_browser.}\\\texttt{export\_utils}} & CSV export field metadata, formatting, and anonymization helpers. & Shared export engine for study-level and databank-level CSV workflows. \\
+\makecell[l]{\texttt{dicom\_browser.}\\\texttt{study\_service}} & Study-detail payload assembly and private-tag enrichment. & Consolidates detail-view logic and keeps route handlers thin. \\
+\makecell[l]{\texttt{dicom\_browser.}\\\texttt{dashboard\_service}} & Dashboard aggregation, histogram generation, and QA summary computation. & Central analytics layer used by the dashboard route. \\
 \texttt{process\_dicom} & End-to-end orchestration (discovery, extraction, insertion, representative marking, archive handling). & Main benchmarked processing entry point in Chapter 4. \\
 \makecell[l]{\texttt{extract\_one\_}\\\texttt{per\_series}} & One-instance-per-series subset construction. & Preprocessing utility for filtered-size and raw-vs-filtered benchmark comparisons. \\
 \texttt{webui} & Flask application for index/detail/dashboard/export and interactive QA drill-down. & User-facing system component evaluated through workflow screenshots and feature coverage. \\
@@ -184,7 +188,7 @@ The web application provides databank-aware navigation and switching, study inde
 The dashboard provides protocol adherence and QA analytics for representative series. Views include completeness checks, timing-integrity checks, dose-plausibility checks, scanner-landscape summaries, protocol--radiopharmaceutical summaries, derived-object indicators, duplicate/collision indicators, study-composition checks, and QA score distributions. Drill-down links map dashboard findings back to index filters, keeping anomaly detection and root-cause inspection connected within a single workflow.
 
 \paragraph{Export, Administrative, and API Functions}
-Study-level CSV export supports selectable field sets, grouped export modes, section-based output structure, modality restrictions, and derived fields. Formatting standardizes dates, times, numeric units, and computed fields to reduce downstream cleanup in analysis notebooks. Administrative actions include databank creation, upload-based ingestion from the UI, and controlled study deletion from the databank. An API endpoint for series-level retrieval supports programmatic access for integration and debugging.
+Study-level and databank-level CSV export support selectable field sets, grouped export modes, section-based output structure, modality restrictions, derived fields, optional anonymization, and explicit language selection for exported headers. Formatting standardizes dates, times, numeric units, and computed fields to reduce downstream cleanup in analysis notebooks. Administrative actions include databank creation, upload-based ingestion from the UI, and controlled study deletion from the databank. An API endpoint for series-level retrieval supports programmatic access for integration and debugging.
 
 \subsection{Validation and Demonstration Tooling}
 The project also includes synthetic data tooling for reproducible demonstrations. Mock generation supports single-file output, structured tree generation, and dashboard-focused cohorts with controlled variation across patient naming, modality, manufacturer, radiopharmaceutical context, delay anomalies, dose-per-kg spread, and missing-value scenarios. This supports repeatable UI demonstrations, regression testing of filters and QA logic, and the generation of thesis-ready figures.
@@ -192,12 +196,14 @@ The project also includes synthetic data tooling for reproducible demonstrations
 \subsection{Automated Test and CI Coverage}
 Beyond manual workflow validation, the implementation includes an automated Python test suite covering discovery logic, extraction helpers, processing helpers, storage integration, anonymized export behavior, and web-level utility functions.
 
-The implemented suite currently comprises 58 passing tests organized under \path{tests/}. Representative modules are:
+The implemented suite currently comprises 71 passing tests organized under \path{tests/}. Representative modules are:
 \begin{itemize}
 \item \path{test_dicom_discovery.py}
 \item \path{test_extract_metadata_utils.py}
 \item \path{test_process_dicom_helpers.py}
 \item \path{test_store_metadata_integration.py}
+\item \path{test_study_service.py}
+\item \path{test_dashboard_service.py}
 \item \path{test_webui_utils.py}
 \item \path{test_webui_anonymized_export.py}
 \end{itemize}
@@ -226,34 +232,36 @@ To document the concrete interaction surface of the implemented system, this sec
 \begin{figure}[H]
 \centering
 \subfloat[Index overview with global search, filter toggle, and card-based study list.\label{fig:ui-index-overview}]{
-  \includegraphics[width=0.62\textwidth]{screenshots/ui_index_overview}
+  \includegraphics[width=0.85\textwidth]{screenshots/ui_index_overview}
 }
 
 \subfloat[Filtered index view with active modality, manufacturer, radiopharmaceutical, and numeric range constraints.\label{fig:ui-index-filtered}]{
-  \includegraphics[width=0.62\textwidth]{screenshots/ui_index_filtered}
+  \includegraphics[width=0.85\textwidth]{screenshots/ui_index_filtered}
 }
 \caption{Index-page workflow views.}
 \label{fig:ui-index-paired}
 \end{figure}
 
 The dashboard is used for rapid triage immediately after ingestion. It combines adherence metrics, distribution charts, and QA drill-down links that map directly back to filtered index subsets.
-The dashboard is used for rapid triage immediately after ingestion. It combines adherence metrics, distribution charts, and QA drill-down links that map directly back to filtered index subsets.
 
+\FloatBarrier
 \begin{figure}[htbp]
 \centering
 \subfloat[Dashboard overview with protocol-adherence bars and delay/dose distribution summaries.\label{fig:ui-dashboard-overview}]{
-\includegraphics[width=0.65\textwidth]{screenshots/ui_dashboard_overview}
+\includegraphics[width=0.8\textwidth]{screenshots/ui_dashboard_overview}
 }
 \vspace{0.2em}
 \subfloat[Dashboard QA section showing metadata-completeness bars and per-field missingness drill-down actions.\label{fig:ui-dashboard-qa}]{
-\includegraphics[width=0.65\textwidth]{screenshots/ui_dashboard_qa}
+\includegraphics[width=0.8\textwidth]{screenshots/ui_dashboard_qa}
 }
 \caption{Dashboard workflow views.}
 \label{fig:ui-dashboard-paired}
 \end{figure}
 
+\FloatBarrier
 The study detail view supports record-level validation. It exposes full series metadata, expandable per-series panels, private-tag context, and export controls for downstream analysis notebooks and quality reports.
 
+\FloatBarrier
 \begin{figure}[p]
 \centering
 \subfloat[Study detail overview with header actions and patient/study metadata tables.\label{fig:ui-study-detail-overview}]{%
@@ -273,15 +281,16 @@ The study detail view supports record-level validation. It exposes full series m
 \includegraphics[width=0.80\textwidth]{screenshots/ui_series_details_panel}
 }
 \vspace{0.2em}
-\subfloat[Export modal with section-based field selection, grouping controls, and CSV download action.\label{fig:ui-study-export-modal}]{
+\subfloat[Export modal with section-based field selection, grouping controls, anonymization toggles, and explicit CSV language selection.\label{fig:ui-study-export-modal}]{
 \includegraphics[width=0.88\textwidth]{screenshots/ui_study_export_modal}
 }
 \caption{Series inspection and export workflow views.}
 \label{fig:ui-series-export-paired}
 \end{figure}
 
+\FloatBarrier
 Absolute local file paths shown in study-level views are intentionally redacted in the figures to protect personal information and local workstation details, while preserving the structure and interpretation of the interface elements.
 
-Several interaction capabilities are described in the report, even when not foregrounded in a specific screenshot. These include databank switching from the top navigation, language switching (German and English), databank creation and upload ingestion, direct study deletion, CSV export grouped by modality or section, and dashboard-to-index drill-down links for missingness, timing, dose plausibility, study composition, and QA score buckets. Together, these functions support a closed loop in which users ingest data, identify anomalies, inspect causal metadata at series level, and export reproducible subsets for external analysis.
+Several interaction capabilities are described in the report, even when not foregrounded in a specific screenshot. These include databank switching from the top navigation, language switching (German and English), databank creation and upload ingestion, direct study deletion, CSV export grouped by modality or section, CSV anonymization, export-language selection, and dashboard-to-index drill-down links for missingness, timing, dose plausibility, study composition, and QA score buckets. Together, these functions support a closed loop in which users ingest data, identify anomalies, inspect causal metadata at series level, and export reproducible subsets for external analysis.
 
 \clearpage

@@ -1,0 +1,234 @@
+{
+  "sizes": [
+    {
+      "dataset": "AnonAxilla",
+      "raw_mb": 219.55,
+      "filtered_mb": 49.81,
+      "db_mb": 2.15,
+      "processed_instances": 130
+    },
+    {
+      "dataset": "MIRROR_A",
+      "raw_mb": 30.89,
+      "filtered_mb": 30.77,
+      "db_mb": 1.63,
+      "processed_instances": 45
+    },
+    {
+      "dataset": "PPA",
+      "raw_mb": 370.4,
+      "filtered_mb": 75.77,
+      "db_mb": 6.05,
+      "processed_instances": 173
+    },
+    {
+      "dataset": "LMU_PSMA",
+      "raw_mb": 117089.0,
+      "filtered_mb": 879.44,
+      "db_mb": 6.01,
+      "processed_instances": 1791
+    }
+  ],
+  "filtered": [
+    {
+      "dataset": "AnonAxilla",
+      "elapsed_s": 0.42,
+      "extract_s": 0.39,
+      "insert_s": 0.02,
+      "peak_rss_mib": 60.8,
+      "filtered_mb": 49.81,
+      "db_mb": 2.15
+    },
+    {
+      "dataset": "MIRROR_A",
+      "elapsed_s": 0.35,
+      "extract_s": 0.33,
+      "insert_s": 0.01,
+      "peak_rss_mib": 57.5,
+      "filtered_mb": 30.77,
+      "db_mb": 1.63
+    },
+    {
+      "dataset": "PPA",
+      "elapsed_s": 0.41,
+      "extract_s": 0.37,
+      "insert_s": 0.03,
+      "peak_rss_mib": 67.9,
+      "filtered_mb": 75.77,
+      "db_mb": 6.05
+    },
+    {
+      "dataset": "LMU_PSMA",
+      "elapsed_s": 5.29,
+      "extract_s": 5.02,
+      "insert_s": 0.15,
+      "peak_rss_mib": 82.6,
+      "filtered_mb": 879.44,
+      "db_mb": 6.01
+    }
+  ],
+  "reductions": [
+    {
+      "dataset": "AnonAxilla",
+      "raw_to_filtered_pct": 77.3,
+      "filtered_to_db_pct": 95.7,
+      "raw_to_db_pct": 99.0,
+      "raw_to_db_x": 102.3
+    },
+    {
+      "dataset": "MIRROR_A",
+      "raw_to_filtered_pct": 0.4,
+      "filtered_to_db_pct": 94.7,
+      "raw_to_db_pct": 94.7,
+      "raw_to_db_x": 18.9
+    },
+    {
+      "dataset": "PPA",
+      "raw_to_filtered_pct": 79.5,
+      "filtered_to_db_pct": 92.0,
+      "raw_to_db_pct": 98.4,
+      "raw_to_db_x": 61.3
+    },
+    {
+      "dataset": "LMU_PSMA",
+      "raw_to_filtered_pct": 99.2,
+      "filtered_to_db_pct": 99.3,
+      "raw_to_db_pct": 100.0,
+      "raw_to_db_x": 19486.1
+    }
+  ],
+  "quality": [
+    {
+      "dataset": "AnonAxilla",
+      "radiopharmaceutical": 78,
+      "dose": 78,
+      "inj_time": 78,
+      "acq_time": 129,
+      "valid_delay": 78,
+      "negative": 58,
+      "over_180": 16
+    },
+    {
+      "dataset": "MIRROR_A",
+      "radiopharmaceutical": 20,
+      "dose": 20,
+      "inj_time": 20,
+      "acq_time": 38,
+      "valid_delay": 20,
+      "negative": 16,
+      "over_180": 4
+    },
+    {
+      "dataset": "PPA",
+      "radiopharmaceutical": 96,
+      "dose": 96,
+      "inj_time": 96,
+      "acq_time": 173,
+      "valid_delay": 96,
+      "negative": 0,
+      "over_180": 0
+    },
+    {
+      "dataset": "LMU_PSMA",
+      "radiopharmaceutical": 316,
+      "dose": 597,
+      "inj_time": 597,
+      "acq_time": 1194,
+      "valid_delay": 597,
+      "negative": 0,
+      "over_180": 3
+    }
+  ],
+  "raw_vs_filtered": [
+    {
+      "dataset": "AnonAxilla",
+      "raw_time_s": 0.57,
+      "filtered_time_s": 0.44,
+      "raw_rss_mib": 67.7,
+      "filtered_rss_mib": 59.2,
+      "raw_db_mb": 2.16,
+      "filtered_db_mb": 2.16
+    },
+    {
+      "dataset": "MIRROR_A",
+      "raw_time_s": 0.35,
+      "filtered_time_s": 0.35,
+      "raw_rss_mib": 59.0,
+      "filtered_rss_mib": 57.8,
+      "raw_db_mb": 1.63,
+      "filtered_db_mb": 1.65
+    },
+    {
+      "dataset": "PPA",
+      "raw_time_s": 0.63,
+      "filtered_time_s": 0.39,
+      "raw_rss_mib": 92.5,
+      "filtered_rss_mib": 68.1,
+      "raw_db_mb": 6.03,
+      "filtered_db_mb": 6.04
+    },
+    {
+      "dataset": "LMU_PSMA",
+      "raw_time_s": 168.1,
+      "filtered_time_s": 5.82,
+      "raw_rss_mib": 1806.0,
+      "filtered_rss_mib": 84.2,
+      "raw_db_mb": 6.03,
+      "filtered_db_mb": 5.98
+    }
+  ],
+  "repeatability": [
+    {
+      "dataset": "AnonAxilla",
+      "mean_runtime_s": 0.39,
+      "std_runtime_s": 0.02,
+      "cv_pct": 4.2,
+      "runs_s": [
+        0.42,
+        0.4,
+        0.38,
+        0.39,
+        0.38
+      ]
+    },
+    {
+      "dataset": "MIRROR_A",
+      "mean_runtime_s": 0.35,
+      "std_runtime_s": 0.01,
+      "cv_pct": 2.0,
+      "runs_s": [
+        0.34,
+        0.36,
+        0.35,
+        0.35,
+        0.35
+      ]
+    },
+    {
+      "dataset": "PPA",
+      "mean_runtime_s": 0.39,
+      "std_runtime_s": 0.0,
+      "cv_pct": 1.1,
+      "runs_s": [
+        0.39,
+        0.4,
+        0.39,
+        0.39,
+        0.39
+      ]
+    },
+    {
+      "dataset": "LMU_PSMA",
+      "mean_runtime_s": 5.49,
+      "std_runtime_s": 0.02,
+      "cv_pct": 0.3,
+      "runs_s": [
+        5.47,
+        5.47,
+        5.5,
+        5.5,
+        5.5
+      ]
+    }
+  ]
+}

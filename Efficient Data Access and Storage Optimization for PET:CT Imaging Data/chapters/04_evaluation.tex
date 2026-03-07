@@ -20,8 +20,8 @@ Dataset & Provenance Category & Raw MB & One-instance-per-series MB & DB MB & Pr
 \midrule
 AnonAxilla & Local anonymized subset & 219.55 & 49.81 & 2.15 & 130 \\
 MIRROR\_A  & Local anonymized subset & 30.89  & 30.77 & 1.64 & 45 \\
-PPA       & Local anonymized subset & 370.40 & 75.77 & 6.02 & 173 \\
-LMU\_PSMA & Public TCIA collection  & 117089.00 & 879.44 & 6.00 & 1791 \\
+PPA       & Local anonymized subset & 370.40 & 75.77 & 6.05 & 173 \\
+LMU\_PSMA & Public TCIA collection  & 117089.00 & 879.44 & 6.01 & 1791 \\
 \bottomrule
 \end{tabular}
 }
@@ -49,7 +49,7 @@ Runtime metrics include total elapsed time and stage-level timing (extraction an
 
 \section{Evaluation Results}
 \subsection{Performance, Memory, and Storage Outcomes}
-Filtered-input processing remained practical for iterative workflows: MIRROR\_A completed in approximately 0.46\,s, AnonAxilla in 0.65\,s, and PPA in 0.70\,s, while LMU\_PSMA required approximately 25.64\,s. In all cases, extraction dominated the runtime, and insertion remained a small component.
+Filtered-input processing remained practical for iterative workflows: MIRROR\_A completed in approximately 0.35\,s, AnonAxilla in 0.42\,s, and PPA in 0.41\,s, while LMU\_PSMA required approximately 5.29\,s. In all cases, extraction dominated the runtime, and insertion remained a small component.
 
 Storage reduction was substantial across all datasets. The evaluation reports three size stages (raw folder $\rightarrow$ one-instance-per-series subset $\rightarrow$ databank) and derives percentage and x-fold reductions. Reductions are computed as
 \[
@@ -59,7 +59,7 @@ Storage reduction was substantial across all datasets. The evaluation reports th
 \[
 \text{raw}\rightarrow\text{db}=\left(1-\frac{S_{\text{db}}}{S_{\text{raw}}}\right)\cdot100.
 \]
-Across the benchmark set, overall raw$\rightarrow$db reduction ranges from $94.7\%$ to $99.99\%$, while the intermediate raw$\rightarrow$one-instance-per-series reduction depends strongly on dataset structure.
+Across the benchmark set, overall raw$\rightarrow$db reduction ranges from $94.7\%$ to roughly $99.99\%$, while the intermediate raw$\rightarrow$one-instance-per-series reduction depends strongly on dataset structure.
 
 \begin{table}[htbp]
 \centering
@@ -70,10 +70,10 @@ Across the benchmark set, overall raw$\rightarrow$db reduction ranges from $94.7
 \toprule
 Dataset & Time (s) & Extract (s) & Insert (s) & Peak RSS (MiB) & One-instance-per-series MB & DB MB \\
 \midrule
-AnonAxilla & 0.65 & 0.61 & 0.02 & 65.3 & 49.81 & 2.15 \\
-MIRROR\_A  & 0.46 & 0.43 & 0.02 & 59.9 & 30.77 & 1.64 \\
-PPA        & 0.70 & 0.65 & 0.04 & 94.3 & 75.77 & 6.02 \\
-LMU\_PSMA  & 25.64 & 25.29 & 0.13 & 76.8 & 879.44 & 6.00 \\
+AnonAxilla & 0.42 & 0.39 & 0.02 & 60.8 & 49.81 & 2.15 \\
+MIRROR\_A  & 0.35 & 0.33 & 0.01 & 57.5 & 30.77 & 1.63 \\
+PPA        & 0.41 & 0.37 & 0.03 & 67.9 & 75.77 & 6.05 \\
+LMU\_PSMA  & 5.29 & 5.02 & 0.15 & 82.6 & 879.44 & 6.01 \\
 \bottomrule
 \end{tabular}
 }
@@ -91,17 +91,18 @@ Peak memory remains below 100\,MiB for all filtered-input runs despite large dif
 \toprule
 Dataset & \makecell[c]{Raw$\rightarrow$One-per-series\\(\%)} & \makecell[c]{One-per-series$\rightarrow$DB\\(\%)} & \makecell[c]{Raw$\rightarrow$DB\\(\%)} & \makecell[c]{Raw$\rightarrow$DB\\(x)} \\
 \midrule
-AnonAxilla & 77.3 & 95.7 & 99.0  & 102.1x \\
-MIRROR\_A  & 0.4  & 94.7 & 94.7  & 18.8x \\
-PPA        & 79.5 & 92.1 & 98.4  & 61.5x \\
-LMU\_PSMA  & 99.2 & 99.3 & 99.99 & 19514.8x \\
+AnonAxilla & 77.3 & 95.7 & 99.0  & 102.3x \\
+MIRROR\_A  & 0.4  & 94.7 & 94.7  & 18.9x \\
+PPA        & 79.5 & 92.0 & 98.4  & 61.3x \\
+LMU\_PSMA  & 99.2 & 99.3 & 99.99 & 19486.1x \\
 \bottomrule
 \end{tabular}
 \normalsize
 \end{table}
+\clearpage
 
 \subsection{Raw vs Filtered Effects}
-Raw-vs-filtered paired runs isolate the impact of redundant instance volume on runtime and memory. For AnonAxilla and PPA, filtering yields moderate runtime and RSS reductions. MIRROR\_A changes marginally because raw and filtered inputs are already similar in structure. LMU\_PSMA shows the strongest effect: processing the filtered subset reduces runtime from 165.80\,s to 5.54\,s and peak RSS from about 1.59\,GiB to 82.6\,MiB, while databank size remains essentially unchanged.
+Raw-vs-filtered paired runs isolate the impact of redundant instance volume on runtime and memory. For AnonAxilla and PPA, filtering yields moderate runtime and RSS reductions. MIRROR\_A changes marginally because raw and filtered inputs are already similar in structure. LMU\_PSMA shows the strongest effect: processing the filtered subset reduces runtime from 168.10\,s to 5.82\,s and peak RSS from about 1.81\,GiB to 84.2\,MiB, while databank size remains essentially unchanged.
 
 \begin{table}[htbp]
 \centering
@@ -113,10 +114,10 @@ Raw-vs-filtered paired runs isolate the impact of redundant instance volume on r
 \toprule
 Dataset & Raw Time (s) & Filtered Time (s) & Raw RSS (MiB) & Filtered RSS (MiB) & Raw DB (MB) & Filtered DB (MB) \\
 \midrule
-AnonAxilla & 0.71 & 0.44 & 67.4   & 60.5 & 2.15 & 2.14 \\
-MIRROR\_A  & 0.41 & 0.40 & 59.4   & 58.8 & 1.63 & 1.64 \\
-PPA        & 0.70 & 0.44 & 93.6   & 69.2 & 6.02 & 6.05 \\
-LMU\_PSMA  & 165.80 & 5.54 & 1585.9 & 82.6 & 6.01 & 5.99 \\
+AnonAxilla & 0.57 & 0.44 & 67.7   & 59.2 & 2.16 & 2.16 \\
+MIRROR\_A  & 0.35 & 0.35 & 59.0   & 57.8 & 1.63 & 1.65 \\
+PPA        & 0.63 & 0.39 & 92.5   & 68.1 & 6.03 & 6.04 \\
+LMU\_PSMA  & 168.10 & 5.82 & 1806.0 & 84.2 & 6.03 & 5.98 \\
 \bottomrule
 \end{tabularx}
 \normalsize
@@ -145,8 +146,8 @@ From a nuclear-medicine perspective, delay checks are clinically meaningful. Inj
 Dataset & Radiopharmaceutical & Dose & Inj. & Acq. & Valid & Negative & >180 \\
         &                     &      & time & time & delay &          & min \\
 \midrule
-AnonAxilla & 78  & 78  & 78  & 129  & 78  & 52 & 22 \\
-MIRROR\_A  & 20  & 20  & 20  & 39   & 20  & 14 & 5  \\
+AnonAxilla & 78  & 78  & 78  & 129  & 78  & 58 & 16 \\
+MIRROR\_A  & 20  & 20  & 20  & 38   & 20  & 16 & 4  \\
 PPA        & 96  & 96  & 96  & 173  & 96  & 0  & 0  \\
 LMU\_PSMA  & 316 & 597 & 597 & 1194 & 597 & 0  & 3  \\
 \bottomrule
@@ -166,10 +167,10 @@ Repeated filtered-input runs do not change qualitative conclusions, but they sho
 \toprule
 Dataset & Mean Runtime (s) & Std. Dev. (s) & CV (\%) \\
 \midrule
-AnonAxilla & 0.75 & 0.13 & 17.9 \\
-MIRROR\_A  & 0.79 & 0.14 & 18.5 \\
-PPA        & 0.77 & 0.08 & 10.8 \\
-LMU\_PSMA  & 6.55 & 0.51 & 7.8 \\
+AnonAxilla & 0.39 & 0.02 & 4.2 \\
+MIRROR\_A  & 0.35 & 0.01 & 2.0 \\
+PPA        & 0.39 & 0.00 & 1.1 \\
+LMU\_PSMA  & 5.49 & 0.02 & 0.3 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -185,30 +186,49 @@ Figure~\ref{fig:runtime-breakdown} to Figure~\ref{fig:raw-filtered-runtime-memor
 
 \vspace{-0.6em}
 
+
 \begin{figure}[H]
 \centering
+\captionsetup{font=small}
+\captionsetup[subfloat]{font=footnotesize,justification=raggedright,singlelinecheck=false}
 \subfloat[Total runtime by dataset in seconds (linear y-axis).\label{fig:runtime-breakdown}]{
-\includegraphics[width=0.44\textwidth]{graphs/runtime_breakdown}
+\begin{minipage}[t]{0.46\textwidth}
+\centering
+\includegraphics[width=\linewidth]{graphs/runtime_breakdown}
+ \end{minipage}
 }
-\hfill
+\hspace{0.04\textwidth}
 \subfloat[Overall raw-to-databank storage reduction factor by dataset (x-fold, log y-axis).\label{fig:storage-reduction}]{
-\includegraphics[width=0.44\textwidth]{graphs/storage_reduction}
+\begin{minipage}[t]{0.46\textwidth}
+\centering
+\includegraphics[width=\linewidth]{graphs/storage_reduction}
+ \end{minipage}
 }
 
-\vspace{-0.5em}
-
-\caption{Performance and storage summary plots. Runtime bars use filtered-input benchmark runs; storage factors use raw-folder-to-databank-size ratios.}
+\caption{Performance and storage summary plots. Runtime bars use filtered-input bench-
+mark runs; storage factors use raw-folder-to-databank-size ratios.}
 \label{fig:perf-storage-paired}
 \end{figure}
 
-\begin{figure}[htbp]
+
+\vspace{-0.6em}
+
+\begin{figure}[H]
 \centering
+\captionsetup{font=small}
+\captionsetup[subfloat]{font=footnotesize,justification=raggedright,singlelinecheck=false}
 \subfloat[Heatmap of QA-field completeness counts by dataset (radiopharmaceutical, dose, injection/acquisition time, and valid delay).\label{fig:qa-completeness}]{
-\includegraphics[width=0.48\textwidth]{graphs/qa_completeness}
+\begin{minipage}[t]{0.46\textwidth}
+\centering
+\includegraphics[width=\linewidth]{graphs/qa_completeness}
+ \end{minipage}
 }
-\hfill
+\hspace{0.04\textwidth}
 \subfloat[Temporal-delay anomaly counts by dataset, separated into negative delays and delays above 180 minutes.\label{fig:delay-anomalies}]{
-\includegraphics[width=0.48\textwidth]{graphs/delay_anomalies}
+\begin{minipage}[t]{0.46\textwidth}
+\centering
+\includegraphics[width=\linewidth]{graphs/delay_anomalies}
+ \end{minipage}
 }
 \caption{Quality and anomaly summary plots.}
 \label{fig:quality-delay-paired}
@@ -216,11 +236,11 @@ Figure~\ref{fig:runtime-breakdown} to Figure~\ref{fig:raw-filtered-runtime-memor
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.88\textwidth]{graphs/throughput_vs_size}
+\includegraphics[width=0.5\textwidth]{graphs/throughput_vs_size}
 \caption{Observed throughput versus raw dataset size (log-scaled x-axis). The scatter plot shows that size alone does not fully explain throughput; metadata composition and parsing characteristics also matter.}
 \label{fig:throughput-size}
 \end{figure}
-\clearpage
+
 
 \begin{figure}[H]
 \centering
@@ -238,5 +258,3 @@ Temporal QA surfaced problematic subsets immediately after ingestion rather than
 
 \section{Measurement Scope and Limits}
 The evaluation emphasizes throughput, storage behavior, completeness, and anomaly counts because these metrics directly affect practical metadata workflows. Peak RSS provides a coarse view of memory behavior but does not separate parser memory from framework overhead, nor does it capture per-worker memory under alternative parallel settings. This limitation does not affect the runtime and storage findings, but it constrains fine-grained scalability claims for very large file counts. Extending the benchmark harness with stage-level memory profiling is a concrete next step.
-
-
