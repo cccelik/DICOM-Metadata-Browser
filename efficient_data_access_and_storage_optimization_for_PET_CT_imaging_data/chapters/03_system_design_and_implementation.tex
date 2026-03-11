@@ -4,7 +4,7 @@ Requirements were derived from iterative interaction with real repository struct
 
 Non-functional requirements include local deployability, bounded resource use, resilience to imperfect inputs, and maintainability of code structure. Reliability requirements emphasize graceful degradation: unreadable files should be skipped and reported rather than causing a full run failure.
 
-The design principles that emerge from these requirements are consistency, traceability, and interpretability. Consistency requires shared discovery and parsing logic across all tools. Traceability preserves a clear path from aggregated metrics back to the underlying source records. Interpretability ensures that quality signals remain grounded in explicit metadata fields rather than opaque black-box outputs.
+The design principles that emerge from these requirements are consistency, traceability, and interpretability. Consistency calls for shared discovery and parsing logic across all tools. Traceability preserves a clear path from aggregated metrics back to the underlying source records. Interpretability helps keep quality signals grounded in explicit metadata fields rather than opaque black-box outputs.
 
 \section{Architecture Overview}
 
@@ -12,9 +12,9 @@ The system is structured as a layered pipeline with explicit stage boundaries. D
 
 This separation offers practical benefits: each stage can be verified independently, failure models remain localized, and bottlenecks are easier to attribute. It also enables incremental evolution without destabilizing the whole pipeline. For example, search ranking can be refined in the web layer without touching extraction, and private-tag classification can be extended without changing discovery.
 
-From a software-architecture perspective, the design improves cohesion while controlling coupling. Each stage has a single dominant responsibility (candidate selection, extraction, persistence, aggregation, or presentation), which increases intra-module cohesion. Interfaces between stages are intentionally narrow, primarily typed metadata records and stable identifiers, reducing inter-module coupling and lowering regression risk during feature extension.
+From a software-architecture perspective, the design improves cohesion while controlling coupling. Each stage has a primary responsibility (candidate selection, extraction, persistence, aggregation, or presentation), which increases intra-module cohesion. Interfaces between stages are intentionally narrow, primarily typed metadata records and stable identifiers, reducing inter-module coupling and lowering regression risk during feature extension.
 
-The architecture also constrains the growth of complexity in routine runs. Processing \(N\) files incurs approximately linear discovery, extraction, and insertion effort \(O(N)\). Representative marking is driven by series grouping and remains linear in the number of observed series. By avoiding nested cross-layer control flow, the pipeline prevents superlinear behavior that would otherwise emerge from repeated rescans and cross-stage feedback loops. 
+The architecture also constrains the growth of complexity in routine runs. Processing \(N\) files incurs approximately linear discovery, extraction, and insertion effort \(O(N)\). Representative marking is driven by series grouping and remains linear in the number of observed series. By avoiding nested cross-layer control flow, the pipeline helps avoid superlinear behavior that might otherwise emerge from repeated rescans and cross-stage feedback loops. 
 
 \begin{figure}[htbp]
 \centering
@@ -222,7 +222,7 @@ Query design follows two stages. First, SQL retrieves candidates using indexed f
 \section{User Workflow and Interface Design}
 The interface reflects the workflow users typically follow. Sessions begin with broad study exploration, transition to targeted filtering, and end with either record-level inspection or export for external analysis. The dashboard supports this loop as an integrated triage surface rather than a disconnected reporting tool.
 
-A key design principle is progressive detail. High-level pages prioritize compact representative information, while detail pages expose deeper context for individual records. This helps users detect anomalies quickly without being overwhelmed at the start.
+A key design principle is progressive detail. High-level pages prioritize compact representative information, while detail pages expose deeper context for individual records. This helps users detect anomalies relatively quickly without being overwhelmed at the start.
 
 The export subsystem emphasizes interoperability. Users can select meaningful field groups and include derived values commonly required in analysis notebooks, reducing repetitive postprocessing outside the system.
 
@@ -242,7 +242,7 @@ To document the concrete interaction surface of the implemented system, this sec
 \label{fig:ui-index-paired}
 \end{figure}
 
-The dashboard is used for rapid triage immediately after ingestion. It combines adherence metrics, distribution charts, and QA drill-down links that map directly back to filtered index subsets.
+The dashboard is intended for rapid triage soon after ingestion. It combines adherence metrics, distribution charts, and QA drill-down links that map directly back to filtered index subsets.
 
 \FloatBarrier
 \begin{figure}[htbp]

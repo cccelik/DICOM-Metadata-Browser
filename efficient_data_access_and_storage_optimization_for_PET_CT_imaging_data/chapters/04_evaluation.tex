@@ -1,13 +1,13 @@
  % Consolidated Chapter 4 (revised)
 \chapter{Evaluation}
-This chapter evaluates the system as an empirical assessment on four datasets available in the project environment: AnonAxilla, MIRROR\_A, PPA, and the public TCIA cohort LMU\_PSMA \cite{lmu_psma_tcia_2026}. The measurements cover end-to-end and stage-level runtime, databank size and reduction factors, peak memory (RSS), structural counts, metadata completeness, and temporal-delay anomaly statistics. The evaluation deliberately reports performance together with quality behavior: fast ingestion without usable metadata is unhelpful, while expensive quality logic prevents iterative use.
+This chapter evaluates the system through an empirical assessment on four datasets available in the project environment: AnonAxilla, MIRROR\_A, PPA, and the public TCIA cohort LMU\_PSMA \cite{lmu_psma_tcia_2026}. The measurements cover end-to-end and stage-level runtime, databank size and reduction factors, peak memory (RSS), structural counts, metadata completeness, and temporal-delay anomaly statistics. The evaluation reports performance together with quality behavior because both aspects shape practical usability: fast ingestion is less meaningful without usable metadata, while costly quality logic can make iterative use more difficult.
 
-An additional dataset was originally planned for inclusion, namely the TCIA collection \emph{FDG-PET-CT-Lesions} (\url{https://www.cancerimagingarchive.net/collection/fdg-pet-ct-lesions/}). Access was unavailable during the project period due to TCIA's controlled-access transition, introduced in 2025 under NIH policy changes (including Guide Notice NOT-OD-25-083 and TCIA's controlled-access hosting sunset timeline). Consequently, only datasets that were accessible and processable locally are reported. For context, TCIA remains a widely used public imaging repository for quantitative imaging research and benchmark development.
+An additional dataset was originally planned for inclusion, namely the TCIA collection \emph{FDG-PET-CT-Lesions} (\url{https://www.cancerimagingarchive.net/collection/fdg-pet-ct-lesions/}). Access was unavailable during the project period due to TCIA's controlled-access transition, introduced in 2025 under NIH policy changes (including Guide Notice NOT-OD-25-083 and TCIA's controlled-access hosting sunset timeline). Consequently, the evaluation is limited to datasets that were accessible and processable locally. For context, TCIA remains a widely used public imaging repository for quantitative imaging research and benchmark development.
 
 \section{Dataset Structure and Characteristics}
 Because external readers do not have access to the local input folders used in this thesis, this section summarizes dataset structure, provenance, and analysis-relevant characteristics at a descriptive level.
 
-All datasets follow the standard DICOM hierarchy (Patient $\rightarrow$ Study $\rightarrow$ Series $\rightarrow$ Instance), but differ in scale, preprocessing history, and metadata readiness. Three datasets (AnonAxilla, MIRROR\_A, and PPA) were processed as local research subsets, while LMU\_PSMA is a public TCIA collection \cite{lmu_psma_tcia_2026}. For comparability, each dataset is profiled by raw size, one-instance-per-series size, resulting databank size, and processed instance count.
+All datasets follow the standard DICOM hierarchy (Patient $\rightarrow$ Study $\rightarrow$ Series $\rightarrow$ Instance), but differ in scale, preprocessing history, and metadata readiness. Three anonymized data pools (AnonAxilla, MIRROR\_A, and PPA) were processed as local research subsets, while LMU\_PSMA is a public TCIA collection \cite{lmu_psma_tcia_2026}. For comparability, each dataset is profiled by raw size, one-instance-per-series size, resulting databank size, and processed instance count.
 
 \begin{table}[htbp]
 \centering
@@ -27,7 +27,7 @@ LMU\_PSMA & Public TCIA collection  & 117089.00 & 879.44 & 6.01 & 1791 \\
 }
 \end{table}
 
-Table~\ref{tab:dataset-profile-summary} highlights that scale alone is not a sufficient proxy for metadata readiness: temporal and radiopharmaceutical field availability varies markedly and directly affects QA interpretability and downstream analytic usability.
+Table~\ref{tab:dataset-profile-summary} suggests that scale alone is not a sufficient proxy for metadata readiness: temporal and radiopharmaceutical field availability varies markedly and influences QA interpretability and downstream analytic usability.
 
 \section{Benchmark Commands}
 All runs used a consistent command structure:
@@ -49,7 +49,7 @@ Runtime metrics include total elapsed time and stage-level timing (extraction an
 
 \section{Evaluation Results}
 \subsection{Performance, Memory, and Storage Outcomes}
-Filtered-input processing remained practical for iterative workflows: MIRROR\_A completed in approximately 0.35\,s, AnonAxilla in 0.42\,s, and PPA in 0.41\,s, while LMU\_PSMA required approximately 5.29\,s. In all cases, extraction dominated the runtime, and insertion remained a small component.
+Filtered-input processing remained practical for iterative workflows (hardware is defined in appendix B.1): MIRROR\_A completed in approximately 0.35\,s, AnonAxilla in 0.42\,s, and PPA in 0.41\,s, while LMU\_PSMA required approximately 5.29\,s. In all cases, extraction dominated the runtime, and insertion remained a small component.
 
 Storage reduction was substantial across all datasets. The evaluation reports three size stages (raw folder $\rightarrow$ one-instance-per-series subset $\rightarrow$ databank) and derives percentage and x-fold reductions. Reductions are computed as
 \[
@@ -79,9 +79,9 @@ LMU\_PSMA  & 5.29 & 5.02 & 0.15 & 82.6 & 879.44 & 6.01 \\
 }
 \end{table}
 
-Peak memory remains below 100\,MiB for all filtered-input runs despite large differences in raw dataset size and file count. This is consistent with metadata-only parsing and bounded per-file state rather than pixel-array loading.
+Peak memory stays below 100\,MiB for all filtered-input runs despite large differences in raw dataset size and file count. This appears consistent with metadata-only parsing and bounded per-file state rather than pixel-array loading.
 
-Table~\ref{tab:filtered-benchmark-summary} also shows that the dominant performance difference is not insertion but extraction time, especially for LMU\_PSMA. This supports the later runtime interpretation that front-stage parsing work, not databank writing, is the principal throughput constraint in the current implementation.
+Table~\ref{tab:filtered-benchmark-summary} also shows that the main performance difference lies in extraction time rather than insertion, especially for LMU\_PSMA. This supports the later runtime interpretation that front-stage parsing work, more than databank writing, is the main throughput constraint in the current implementation.
 
 \begin{table}[htbp]
 \centering
@@ -102,11 +102,11 @@ LMU\_PSMA  & 99.2 & 99.3 & 99.99 & 19486.1x \\
 \normalsize
 \end{table}
 
-Table~\ref{tab:storage-reduction-metrics} makes the structural dependence of reduction explicit. MIRROR\_A shows almost no raw-to-one-per-series gain, indicating that its source layout already contains little instance redundancy, whereas LMU\_PSMA benefits enormously from instance reduction before databank storage because repeated image content dominates the raw dataset size.
+Table~\ref{tab:storage-reduction-metrics} makes the structural dependence of reduction more explicit. MIRROR\_A shows almost no raw-to-one-per-series gain, suggesting that its source layout already contains little instance redundancy, whereas LMU\_PSMA appears to benefit particularly strongly from instance reduction before databank storage because repeated image content dominates the raw dataset size.
 
 
 \subsection{Raw vs Filtered Effects}
-Raw-vs-filtered paired runs isolate the impact of redundant instance volume on runtime and memory. For AnonAxilla and PPA, filtering yields moderate runtime and RSS reductions. MIRROR\_A changes marginally because raw and filtered inputs are already similar in structure. LMU\_PSMA shows the strongest effect: processing the filtered subset reduces runtime from 168.10\,s to 5.82\,s and peak RSS from about 1.81\,GiB to 84.2\,MiB, while databank size remains essentially unchanged.
+Raw-vs-filtered paired runs isolate the impact of redundant instance volume on runtime and memory. For AnonAxilla and PPA, filtering yields moderate runtime and RSS reductions. MIRROR\_A changes only marginally because raw and filtered inputs are already similar in structure. LMU\_PSMA shows the largest effect in this set: processing the filtered subset reduces runtime from 168.10\,s to 5.82\,s and peak RSS from about 1.81\,GiB to 84.2\,MiB, while databank size remains largely unchanged.
 
 \begin{table}[htbp]
 \centering
@@ -127,10 +127,10 @@ LMU\_PSMA  & 168.10 & 5.82 & 1806.0 & 84.2 & 6.03 & 5.98 \\
 \normalsize
 \end{table}
 
-Table~\ref{tab:raw-vs-filtered} shows that filtering changes runtime and memory much more than final databank size. This is an important practical result: for the current metadata-focused workflow, repeated raw instances impose substantial processing cost even when they contribute comparatively little additional databank information.
+Table~\ref{tab:raw-vs-filtered} shows that filtering changes runtime and memory much more than final databank size. This is practically relevant for the current metadata-focused workflow: repeated raw instances can impose substantial processing cost even when they contribute comparatively little additional databank information.
 
 \subsection{Quality and Temporal Integrity Outcomes}
-Completeness and anomaly behavior varied strongly across datasets. Some cohorts contained rich radiopharmaceutical and timing fields, while others lacked them almost entirely. In this benchmark set, negative-delay anomalies were concentrated in AnonAxilla and MIRROR\_A (Table~\ref{tab:quality-counts}). Based on dataset provenance and repeated field-pattern inspection, these anomalies are consistent with timestamp side effects introduced during anonymization using Siemens teamplay Privacy Protection App (version 2.1). This reinforces the need for integrated temporal QA: a DICOM object can remain structurally valid while carrying temporally inconsistent metadata after preprocessing.
+Completeness and anomaly behavior varied strongly across datasets. Some cohorts contained richer radiopharmaceutical and timing fields, while others lacked many of them. In this benchmark set, negative-delay anomalies were concentrated in AnonAxilla and MIRROR\_A (Table~\ref{tab:quality-counts}). Based on dataset provenance and repeated field-pattern inspection, these anomalies appear consistent with timestamp side effects introduced during anonymization using Siemens teamplay Privacy Protection App (version 2.1). This underlines the value of integrated temporal QA: a DICOM object can remain structurally valid while still carrying temporally inconsistent metadata after preprocessing.
 
 From a nuclear-medicine perspective, delay checks are clinically meaningful. Injection-to-acquisition timing influences decay correction and quantitative PET interpretation; implausible negative delays or very large positive delays can bias standardized uptake values (SUV) and reduce comparability across cohorts \cite{suv}. Integrating this validation during ingestion supports early triage of protocol-inconsistent subsets before model training or statistical analysis.
 
@@ -166,7 +166,7 @@ LMU\_PSMA  & 316 & 597 & 597 & 1194 & 597 & 0  & 3  \\
 Table~\ref{tab:quality-counts} further shows that missingness and anomaly behavior are dataset-specific rather than uniform. PPA combines relatively strong timing completeness with no negative delays, while AnonAxilla and MIRROR\_A combine smaller valid-delay counts with a high anomaly share, making them less reliable for downstream timing-sensitive PET analyses without additional review.
 
 \subsection{Repeatability and Runtime Interpretation}
-Repeated filtered-input runs do not change qualitative conclusions, but they show measurable short-run sensitivity. Relative variance is highest for the smallest jobs (sub-second to low-second runtime), where process startup and filesystem variability contribute proportionally more noise, while the larger LMU\_PSMA run remains comparatively stable.
+Repeated filtered-input runs do not change the qualitative conclusions, but they do show measurable short-run sensitivity. Relative variance is highest for the smallest jobs (sub-second to low-second runtime), where process startup and file system variability contribute proportionally more noise, while the larger LMU\_PSMA run remains comparatively stable.
 
 \begin{table}[htbp]
 \centering
@@ -184,18 +184,16 @@ LMU\_PSMA  & 5.49 & 0.02 & 0.3 \\
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:runtime-repeatability} indicates that the processing pipeline is stable enough for comparative benchmarking despite short-run noise. The very low coefficient of variation for LMU\_PSMA suggests that larger jobs average out startup and filesystem jitter more effectively than the smallest benchmark cases.
+Table~\ref{tab:runtime-repeatability} indicates that the processing pipeline is sufficiently stable for comparative benchmarking despite short-run noise. The low coefficient of variation for LMU\_PSMA suggests that larger jobs average out startup and file system jitter more effectively than the smallest benchmark cases.
 
 \subsection{Interpretation of Runtime Composition}
-Runtime is not determined by instance count alone. Header complexity, private-tag volume, and modality-specific metadata structure affect effective per-instance cost. Extraction dominates because each instance requires repeated file-open operations, DICOM header decoding, private-tag traversal, and field normalization, whereas insertion is a batched write path with relatively small per-row overhead. A useful approximation is
+On a given hardware platform, execution time is not determined solely by instance count. Header complexity, private-tag volume, and modality-specific metadata structure affect effective per-instance cost. Extraction dominates because each instance requires repeated file-open operations, DICOM header decoding, private-tag traversal, and field normalization, whereas insertion is a batched write path with relatively small per-row overhead. A useful approximation is
 \[
 T_{\text{extract}}(N) \approx N \cdot (t_{\text{open}} + t_{\text{read}} + t_{\text{parse}} + t_{\text{map}}),
 \]
 which is near-linear in the number of instances \(N\), but with a larger constant factor than insertion. This profile suggests an optimization order driven by the front stage: improve candidate prefilter precision, parser throughput, and read locality first, then tune storage writes.
 
 Figure~\ref{fig:runtime-breakdown} to Figure~\ref{fig:raw-filtered-runtime-memory} present plots and graphs directly from the benchmark values. Total runtime and memory views use linear scales for direct comparison, while the raw-vs-filtered runtime panel uses a log y-axis to preserve visibility across large gaps.
-
-\vspace{-0.6em}
 
 
 \begin{figure}[H]
@@ -221,23 +219,23 @@ mark runs; storage factors use raw-folder-to-databank-size ratios.}
 \label{fig:perf-storage-paired}
 \end{figure}
 
-Figure~\ref{fig:runtime-breakdown} makes the runtime imbalance visually immediate: LMU\_PSMA is clearly separated from the smaller local subsets, yet even there the filtered-input workflow remains in a range compatible with iterative use. Figure~\ref{fig:storage-reduction} complements the table by emphasizing the order-of-magnitude differences in reduction factors; the log scale makes it clear that LMU\_PSMA is not merely ``somewhat better'' but belongs to a different compression regime due to its extreme raw-to-databank size gap.
+Figure~\ref{fig:runtime-breakdown} makes the runtime imbalance easy to see: LMU\_PSMA is clearly separated from the smaller local subsets, yet even there the filtered-input workflow remains within a range compatible with iterative use. Figure~\ref{fig:storage-reduction} complements the table by emphasizing the order-of-magnitude differences in reduction factors; on the log scale, LMU\_PSMA appears to occupy a different compression regime due to its extreme raw-to-databank size gap.
 
-\vspace{-2.15em}
+\vspace{-2em}
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \captionsetup{font=small}
 \captionsetup[subfloat]{font=footnotesize,justification=raggedright,singlelinecheck=false}
 \subfloat[Heatmap of QA-field completeness counts by dataset (radiopharmaceutical, dose, injection/acquisition time, and valid delay).\label{fig:qa-completeness}]{
-\begin{minipage}[t]{0.46\textwidth}
+\begin{minipage}[t]{0.4\textwidth}
 \centering
 \includegraphics[width=\linewidth]{graphs/qa_completeness}
  \end{minipage}
 }
-\hspace{0.04\textwidth}
+\hspace{0.02\textwidth}
 \subfloat[Temporal-delay anomaly counts by dataset, separated into negative delays and delays above 180 minutes.\label{fig:delay-anomalies}]{
-\begin{minipage}[t]{0.46\textwidth}
+\begin{minipage}[t]{0.4\textwidth}
 \centering
 \includegraphics[width=\linewidth]{graphs/delay_anomalies}
  \end{minipage}
@@ -245,8 +243,9 @@ Figure~\ref{fig:runtime-breakdown} makes the runtime imbalance visually immediat
 \caption[Quality and anomaly summary plots]{Quality and anomaly summary plots.}
 \label{fig:quality-delay-paired}
 \end{figure}
+\FloatBarrier
 
-Figure~\ref{fig:qa-completeness} improves cross-dataset comparison by showing completeness as a pattern rather than as isolated counts: PPA appears comparatively balanced, whereas AnonAxilla and MIRROR\_A show visibly sparse timing and radiopharmaceutical coverage. Figure~\ref{fig:delay-anomalies} reinforces that anomaly burden is concentrated rather than uniformly distributed, which supports the interpretation that preprocessing history, not only dataset size, drives temporal QA risk.
+Figure~\ref{fig:qa-completeness} supports cross-dataset comparison by showing completeness as a pattern rather than as isolated counts: PPA appears comparatively balanced, whereas AnonAxilla and MIRROR\_A show sparser timing and radiopharmaceutical coverage. Figure~\ref{fig:delay-anomalies} likewise suggests that anomaly burden is concentrated rather than uniformly distributed, which supports the interpretation that preprocessing history, not only dataset size, influences temporal QA risk.
 
 \begin{figure}[htbp]
 \centering
@@ -254,8 +253,9 @@ Figure~\ref{fig:qa-completeness} improves cross-dataset comparison by showing co
 \caption[Observed throughput versus raw dataset size]{Observed throughput versus raw dataset size (log-scaled x-axis). The scatter plot shows that size alone does not fully explain throughput; metadata composition and parsing characteristics also matter.}
 \label{fig:throughput-size}
 \end{figure}
+\FloatBarrier
 
-Figure~\ref{fig:throughput-size} is useful because it rejects an overly simple ``bigger dataset means proportionally slower throughput'' interpretation. The spread across points indicates that effective throughput depends not only on raw size, but also on structural redundancy, metadata density, and parser-visible header complexity.
+Figure~\ref{fig:throughput-size} is useful because it cautions against an overly simple ``bigger dataset means proportionally slower throughput'' interpretation. The spread across points indicates that effective throughput depends not only on raw size, but also on structural redundancy, metadata density, and parser-visible header complexity.
 
 
 \begin{figure}[H]
@@ -264,15 +264,16 @@ Figure~\ref{fig:throughput-size} is useful because it rejects an overly simple `
 \caption[Direct raw-vs-filtered processing comparison]{Direct raw-vs-filtered processing comparison for runtime (log-scale y-axis) and peak RSS memory (linear scale). The LMU\_PSMA pair shows the greatest improvement after filtering.}
 \label{fig:raw-filtered-runtime-memory}
 \end{figure}
+\FloatBarrier
 
-Figure~\ref{fig:raw-filtered-runtime-memory} makes the practical value of instance reduction especially clear for LMU\_PSMA: runtime and memory both collapse sharply after filtering, while the databank result changes only marginally. This visual therefore supports the broader claim that repeated instance-level metadata often carries high processing cost but comparatively low incremental value for the current databank-oriented workflow.
+Figure~\ref{fig:raw-filtered-runtime-memory} makes the practical value of instance reduction especially clear for LMU\_PSMA: runtime and memory both decrease sharply after filtering, while the databank result changes only marginally. This visual therefore supports the broader observation that repeated instance-level metadata can carry high processing cost but comparatively low incremental value for the current databank-oriented workflow.
 
 \section{Case Analysis}
 To complement aggregated metrics, this chapter highlights selected workflow cases.
 
 Archive ingestion reduced manual preprocessing by integrating extraction and cleanup into a single run, even when datasets arrived in mixed formats. Staged discovery improved recall in heterogeneous filename environments compared with extension-only filtering, and the parse fallback for extensionless files was important for vendor-export edge cases.
 
-Temporal QA surfaced problematic subsets immediately after ingestion rather than late in analysis notebooks. In provenance-oriented workflows, preserved private tags provided additional context for comparing scanner and pipeline behavior across cohorts; even without full semantic decoding, creator identifiers and fingerprints improved traceability.
+Temporal QA helped surface problematic subsets early in the workflow rather than only later in analysis notebooks. In provenance-oriented workflows, preserved private tags provided additional context for comparing scanner and pipeline behavior across cohorts; even without full semantic decoding, creator identifiers and fingerprints improved traceability.
 
 \section{Measurement Scope and Limits}
 The evaluation emphasizes throughput, storage behavior, completeness, and anomaly counts because these metrics directly affect practical metadata workflows. Peak RSS provides a coarse view of memory behavior but does not separate parser memory from framework overhead, nor does it capture per-worker memory under alternative parallel settings. This limitation does not affect the runtime and storage findings, but it constrains fine-grained scalability claims for very large file counts. Extending the benchmark harness with stage-level memory profiling is a concrete next step.
