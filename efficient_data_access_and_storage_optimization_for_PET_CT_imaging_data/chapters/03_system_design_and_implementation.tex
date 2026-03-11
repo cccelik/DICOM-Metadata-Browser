@@ -54,7 +54,7 @@ The architecture also constrains the growth of complexity in routine runs. Proce
 \end{tikzpicture}%
 }
 
-\caption{End-to-end processing flow from heterogeneous inputs to interactive QA and export.}
+\caption[End-to-end processing flow]{End-to-end processing flow from heterogeneous inputs to interactive QA and export.}
 \label{fig:architecture-flow}
 \end{figure}
 
@@ -70,7 +70,7 @@ The architecture also constrains the growth of complexity in routine runs. Proce
 \draw[->, thick] (series) -- (inst);
 \draw[->, thick] (series) -- (priv);
 \end{tikzpicture}
-\caption{Normalized hierarchy sketch used by the databank model. Repeated study/series fields are stored once per hierarchy level instead of once per instance.}
+\caption[Normalized hierarchy sketch]{Normalized hierarchy sketch used by the databank model. Repeated study/series fields are stored once per hierarchy level instead of once per instance.}
 \label{fig:normalized-schema-sketch}
 \end{figure}
 
@@ -238,7 +238,7 @@ To document the concrete interaction surface of the implemented system, this sec
 \subfloat[Filtered index view with active modality, manufacturer, radiopharmaceutical, and numeric range constraints.\label{fig:ui-index-filtered}]{
   \includegraphics[width=0.85\textwidth]{screenshots/ui_index_filtered}
 }
-\caption{Index-page workflow views.}
+\caption[Index-page workflow views]{Index-page workflow views.}
 \label{fig:ui-index-paired}
 \end{figure}
 
@@ -254,7 +254,7 @@ The dashboard is used for rapid triage immediately after ingestion. It combines 
 \subfloat[Dashboard QA section showing metadata-completeness bars and per-field missingness drill-down actions.\label{fig:ui-dashboard-qa}]{
 \includegraphics[width=0.8\textwidth]{screenshots/ui_dashboard_qa}
 }
-\caption{Dashboard workflow views.}
+\caption[Dashboard workflow views]{Dashboard workflow views.}
 \label{fig:ui-dashboard-paired}
 \end{figure}
 
@@ -271,7 +271,7 @@ The study detail view supports record-level validation. It exposes full series m
 \subfloat[Expanded study-detail view showing the series table with one row opened for inline details.\label{fig:ui-study-detail-expanded}]{%
 \includegraphics[width=0.94\textwidth]{screenshots/ui_study_detail_expanded}
 }
-\caption{Study-detail workflow views.}
+\caption[Study-detail workflow views]{Study-detail workflow views.}
 \label{fig:ui-study-detail-paired}
 \end{figure}
 
@@ -284,7 +284,7 @@ The study detail view supports record-level validation. It exposes full series m
 \subfloat[Export modal with section-based field selection, grouping controls, anonymization toggles, and explicit CSV language selection.\label{fig:ui-study-export-modal}]{
 \includegraphics[width=0.88\textwidth]{screenshots/ui_study_export_modal}
 }
-\caption{Series inspection and export workflow views.}
+\caption[Series inspection and export workflow views]{Series inspection and export workflow views.}
 \label{fig:ui-series-export-paired}
 \end{figure}
 

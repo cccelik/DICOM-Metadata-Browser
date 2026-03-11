@@ -7,7 +7,7 @@ An additional dataset was originally planned for inclusion, namely the TCIA coll
 \section{Dataset Structure and Characteristics}
 Because external readers do not have access to the local input folders used in this thesis, this section summarizes dataset structure, provenance, and analysis-relevant characteristics at a descriptive level.
 
-All datasets follow the standard DICOM hierarchy (Patient $\rightarrow$ Study $\rightarrow$ Series $\rightarrow$ Instance), but differ in scale, preprocessing history, and metadata readiness. Three datasets (AnonAxilla, MIRROR\_A, and PPA) were processed as local research subsets, while LMU\_PSMA is a public TCIA collection \cite{lmu_psma_tcia_2026}. For comparability, each dataset is profiled by raw size, one-instance-per-series size, resulting databank size, processed instance count, and the number of instances with valid delay computation.
+All datasets follow the standard DICOM hierarchy (Patient $\rightarrow$ Study $\rightarrow$ Series $\rightarrow$ Instance), but differ in scale, preprocessing history, and metadata readiness. Three datasets (AnonAxilla, MIRROR\_A, and PPA) were processed as local research subsets, while LMU\_PSMA is a public TCIA collection \cite{lmu_psma_tcia_2026}. For comparability, each dataset is profiled by raw size, one-instance-per-series size, resulting databank size, and processed instance count.
 
 \begin{table}[htbp]
 \centering
@@ -162,6 +162,7 @@ LMU\_PSMA  & 316 & 597 & 597 & 1194 & 597 & 0  & 3  \\
 \normalsize
 \end{table}
 
+\FloatBarrier
 Table~\ref{tab:quality-counts} further shows that missingness and anomaly behavior are dataset-specific rather than uniform. PPA combines relatively strong timing completeness with no negative delays, while AnonAxilla and MIRROR\_A combine smaller valid-delay counts with a high anomaly share, making them less reliable for downstream timing-sensitive PET analyses without additional review.
 
 \subsection{Repeatability and Runtime Interpretation}
@@ -215,14 +216,14 @@ Figure~\ref{fig:runtime-breakdown} to Figure~\ref{fig:raw-filtered-runtime-memor
  \end{minipage}
 }
 
-\caption{Performance and storage summary plots. Runtime bars use filtered-input bench-
+\caption[Performance and storage summary plots]{Performance and storage summary plots. Runtime bars use filtered-input bench-
 mark runs; storage factors use raw-folder-to-databank-size ratios.}
 \label{fig:perf-storage-paired}
 \end{figure}
 
 Figure~\ref{fig:runtime-breakdown} makes the runtime imbalance visually immediate: LMU\_PSMA is clearly separated from the smaller local subsets, yet even there the filtered-input workflow remains in a range compatible with iterative use. Figure~\ref{fig:storage-reduction} complements the table by emphasizing the order-of-magnitude differences in reduction factors; the log scale makes it clear that LMU\_PSMA is not merely ``somewhat better'' but belongs to a different compression regime due to its extreme raw-to-databank size gap.
 
-\vspace{-0.6em}
+\vspace{-2.15em}
 
 \begin{figure}[H]
 \centering
@@ -241,7 +242,7 @@ Figure~\ref{fig:runtime-breakdown} makes the runtime imbalance visually immediat
 \includegraphics[width=\linewidth]{graphs/delay_anomalies}
  \end{minipage}
 }
-\caption{Quality and anomaly summary plots.}
+\caption[Quality and anomaly summary plots]{Quality and anomaly summary plots.}
 \label{fig:quality-delay-paired}
 \end{figure}
 
@@ -250,7 +251,7 @@ Figure~\ref{fig:qa-completeness} improves cross-dataset comparison by showing co
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.6\textwidth]{graphs/throughput_vs_size}
-\caption{Observed throughput versus raw dataset size (log-scaled x-axis). The scatter plot shows that size alone does not fully explain throughput; metadata composition and parsing characteristics also matter.}
+\caption[Observed throughput versus raw dataset size]{Observed throughput versus raw dataset size (log-scaled x-axis). The scatter plot shows that size alone does not fully explain throughput; metadata composition and parsing characteristics also matter.}
 \label{fig:throughput-size}
 \end{figure}
 
@@ -260,7 +261,7 @@ Figure~\ref{fig:throughput-size} is useful because it rejects an overly simple `
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\textwidth]{graphs/raw_vs_filtered_runtime_memory}
-\caption{Direct raw-vs-filtered processing comparison for runtime (log-scale y-axis) and peak RSS memory (linear scale). The LMU\_PSMA pair shows the greatest improvement after filtering.}
+\caption[Direct raw-vs-filtered processing comparison]{Direct raw-vs-filtered processing comparison for runtime (log-scale y-axis) and peak RSS memory (linear scale). The LMU\_PSMA pair shows the greatest improvement after filtering.}
 \label{fig:raw-filtered-runtime-memory}
 \end{figure}
 
