@@ -39,7 +39,7 @@ The \texttt{--no-subdirs} flag ensured consistent directory interpretation, whil
 \subsection*{Run Profiles and Scope Mapping}
 The evaluation uses three run profiles:
 \begin{itemize}
-\item \textbf{Filtered-input benchmark runs}: processing one-instance-per-series inputs (provided where available; graphs otherwise). These runs provide runtime decomposition, peak RSS, storage-stage sizes, reduction metrics, and quality counts (Tables~\ref{tab:filtered-benchmark-summary} and \ref{tab:storage-reduction-metrics}; Figures~\ref{fig:runtime-breakdown}--\ref{fig:throughput-size}).
+\item \textbf{Filtered-input benchmark runs}: processing one-instance-per-series inputs (provided where available; graphs otherwise). These runs provide runtime decomposition, peak RSS, storage-stage sizes, reduction metrics, and quality counts. An LMU\_PSMA-specific dashboard view is discussed separately as a case-oriented drill-down (Tables~\ref{tab:filtered-benchmark-summary} and \ref{tab:storage-reduction-metrics}; Figures~\ref{fig:runtime-breakdown}--\ref{fig:raw-filtered-runtime-memory} and \ref{fig:throughput-size}, plus Figure~\ref{fig:lmu-dashboard-distributions}).
 \item \textbf{Raw-vs-filtered paired runs}: each dataset is processed twice (raw input and filtered input) under fixed workers for direct runtime/RSS and databank-size comparison (Table~\ref{tab:raw-vs-filtered}; Figure~\ref{fig:raw-filtered-runtime-memory}).
 \item \textbf{Repeated filtered-input runs}: five repeats per dataset under fixed workers for variability estimation (Table~\ref{tab:runtime-repeatability}).
 \end{itemize}
@@ -268,12 +268,21 @@ Figure~\ref{fig:throughput-size} is useful because it cautions against an overly
 
 Figure~\ref{fig:raw-filtered-runtime-memory} makes the practical value of instance reduction especially clear for LMU\_PSMA: runtime and memory both decrease sharply after filtering, while the databank result changes only marginally. This visual therefore supports the broader observation that repeated instance-level metadata can carry high processing cost but comparatively low incremental value for the current databank-oriented workflow.
 
+\FloatBarrier
 \section{Case Analysis}
-To complement aggregated metrics, this chapter highlights selected workflow cases.
+To complement the aggregated results, this section turns to a concrete dataset-level example. The earlier cross-dataset summaries showed that LMU\_PSMA combines comparatively complete PET timing metadata with very few temporal anomalies. This makes it a useful follow-up case: once delay and dose values are available and internally plausible, the next question is whether those study-level values also cluster around expected protocol ranges. Figure~\ref{fig:lmu-dashboard-distributions} addresses that question by showing dashboard-derived adherence counts together with the underlying distributions for scan time after injection and injected dose per kilogram.
 
-Archive ingestion reduced manual preprocessing by integrating extraction and cleanup into a single run, even when datasets arrived in mixed formats. Staged discovery improved recall in heterogeneous filename environments compared with extension-only filtering, and the parse fallback for extensionless files was important for vendor-export edge cases.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.96\textwidth]{graphs/lmu_dashboard_distributions}
+\caption[LMU dashboard protocol-adherence and distribution results]{Dashboard-derived LMU\_PSMA protocol-adherence and distribution results. The figure combines the dashboard's adherence summary with the representative-series distributions for scan time after injection and injected dose per kilogram, using the same target ranges (45--75 minutes and 2.5--3.5\,MBq/kg).}
+\label{fig:lmu-dashboard-distributions}
+\end{figure}
+\FloatBarrier
 
-Temporal QA helped surface problematic subsets early in the workflow rather than only later in analysis notebooks. In provenance-oriented workflows, preserved private tags provided additional context for comparing scanner and pipeline behavior across cohorts; even without full semantic decoding, creator identifiers and fingerprints improved traceability.
+All 597 representative LMU studies produced usable delay and dose values in the dashboard aggregation. The protocol-adherence summary shows that 326/597 studies (54.6\%) fall into the dashboard's uptake target band and 359/597 studies (60.1\%) into the dose target band. The scan-time-after-injection distribution is centered somewhat above the 60-minute reference (median 71.5\,min; mean 75.5\,min) and shows a visible right tail up to 195.1\,min, but without negative or $>$240-minute cases. The injected-dose-per-kilogram distribution is more tightly concentrated around the dashboard reference of 3.0\,MBq/kg (median 2.92\,MBq/kg; mean 2.89\,MBq/kg). Taken together, the adherence panel and the two distributions suggest broadly consistent acquisition practice with moderate real-world spread rather than strict protocol uniformity.
+
+Beyond this specific cohort view, several workflow-level observations also emerged during evaluation. Archive ingestion reduced manual preprocessing by integrating extraction and cleanup into a single run, even when datasets arrived in mixed formats. Staged discovery improved recall in heterogeneous filename environments compared with extension-only filtering, and the parse fallback for extensionless files was important for vendor-export edge cases. In provenance-oriented workflows, preserved private tags provided additional context for comparing scanner and pipeline behavior across cohorts; even without full semantic decoding, creator identifiers and fingerprints improved traceability.
 
 \section{Measurement Scope and Limits}
 The evaluation emphasizes throughput, storage behavior, completeness, and anomaly counts because these metrics directly affect practical metadata workflows. Peak RSS provides a coarse view of memory behavior but does not separate parser memory from framework overhead, nor does it capture per-worker memory under alternative parallel settings. This limitation does not affect the runtime and storage findings, but it constrains fine-grained scalability claims for very large file counts. Extending the benchmark harness with stage-level memory profiling is a concrete next step.
