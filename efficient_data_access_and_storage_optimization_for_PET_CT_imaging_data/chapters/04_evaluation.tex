@@ -130,7 +130,7 @@ LMU\_PSMA  & 168.10 & 5.82 & 1806.0 & 84.2 & 6.03 & 5.98 \\
 Table~\ref{tab:raw-vs-filtered} shows that filtering changes runtime and memory much more than final databank size. This is practically relevant for the current metadata-focused workflow: repeated raw instances can impose substantial processing cost even when they contribute comparatively little additional databank information.
 
 \subsection{Quality and Temporal Integrity Outcomes}
-Completeness and anomaly behavior varied strongly across datasets. Some cohorts contained richer radiopharmaceutical and timing fields, while others lacked many of them. In this benchmark set, negative-delay anomalies were concentrated in AnonAxilla and MIRROR\_A (Table~\ref{tab:quality-counts}). Based on dataset provenance and repeated field-pattern inspection, these anomalies appear consistent with timestamp side effects introduced during anonymization using Siemens teamplay Privacy Protection App (version 2.1). This underlines the value of integrated temporal QA: a DICOM object can remain structurally valid while still carrying temporally inconsistent metadata after preprocessing.
+Completeness and anomaly behavior varied strongly across datasets. Some cohorts contained richer radiopharmaceutical and timing fields, while others lacked many of them. In this benchmark set, negative-delay anomalies were concentrated in AnonAxilla and MIRROR\_A (Table~\ref{tab:quality-counts}). This concentration is not randomly distributed across all cohorts; rather, it is confined to datasets with anonymization histories that differ from PPA and LMU\_PSMA. For AnonAxilla and MIRROR\_A, the upstream anonymization workflow used Siemens teamplay Privacy Protection App (version 2.1); given that provenance together with repeated field-pattern inspection, the observed anomaly pattern appears consistent with timestamp side effects introduced during anonymization. This underlines the value of integrated temporal QA: a DICOM object can remain structurally valid while still carrying temporally inconsistent metadata after preprocessing.
 
 From a nuclear-medicine perspective, delay checks are clinically meaningful. Injection-to-acquisition timing influences decay correction and quantitative PET interpretation; implausible negative delays or very large positive delays can bias standardized uptake values (SUV) and reduce comparability across cohorts \cite{suv}. Integrating this validation during ingestion supports early triage of protocol-inconsistent subsets before model training or statistical analysis.
 
@@ -163,7 +163,7 @@ LMU\_PSMA  & 316 & 597 & 597 & 1194 & 597 & 0  & 3  \\
 \end{table}
 
 \FloatBarrier
-Table~\ref{tab:quality-counts} further shows that missingness and anomaly behavior are dataset-specific rather than uniform. PPA combines relatively strong timing completeness with no negative delays, while AnonAxilla and MIRROR\_A combine smaller valid-delay counts with a high anomaly share, making them less reliable for downstream timing-sensitive PET analyses without additional review.
+Table~\ref{tab:quality-counts} further shows that missingness and anomaly behavior are dataset-specific rather than uniform. PPA combines relatively strong timing completeness with no negative delays, while AnonAxilla and MIRROR\_A combine smaller valid-delay counts with a high anomaly share, making them less reliable for downstream timing-sensitive PET analyses without additional review. Read together with the provenance information above, the table therefore supports the interpretation that preprocessing history, and in particular anonymization-side timestamp changes, can materially affect temporal metadata quality.
 
 \subsection{Repeatability and Runtime Interpretation}
 Repeated filtered-input runs do not change the qualitative conclusions, but they do show measurable short-run sensitivity. Relative variance is highest for the smallest jobs (sub-second to low-second runtime), where process startup and file system variability contribute proportionally more noise, while the larger LMU\_PSMA run remains comparatively stable.
@@ -221,21 +221,19 @@ mark runs; storage factors use raw-folder-to-databank-size ratios.}
 
 Figure~\ref{fig:runtime-breakdown} makes the runtime imbalance easy to see: LMU\_PSMA is clearly separated from the smaller local subsets, yet even there the filtered-input workflow remains within a range compatible with iterative use. Figure~\ref{fig:storage-reduction} complements the table by emphasizing the order-of-magnitude differences in reduction factors; on the log scale, LMU\_PSMA appears to occupy a different compression regime due to its extreme raw-to-databank size gap.
 
-\vspace{-2em}
-
 \begin{figure}[!htbp]
 \centering
 \captionsetup{font=small}
 \captionsetup[subfloat]{font=footnotesize,justification=raggedright,singlelinecheck=false}
 \subfloat[Heatmap of QA-field completeness counts by dataset (radiopharmaceutical, dose, injection/acquisition time, and valid delay).\label{fig:qa-completeness}]{
-\begin{minipage}[t]{0.4\textwidth}
+\begin{minipage}[t]{0.47\textwidth}
 \centering
 \includegraphics[width=\linewidth]{graphs/qa_completeness}
  \end{minipage}
 }
 \hspace{0.02\textwidth}
 \subfloat[Temporal-delay anomaly counts by dataset, separated into negative delays and delays above 180 minutes.\label{fig:delay-anomalies}]{
-\begin{minipage}[t]{0.4\textwidth}
+\begin{minipage}[t]{0.47\textwidth}
 \centering
 \includegraphics[width=\linewidth]{graphs/delay_anomalies}
  \end{minipage}
