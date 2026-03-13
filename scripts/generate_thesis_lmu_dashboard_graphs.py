@@ -308,14 +308,14 @@ def add_distribution_panel(
     )
 
 
-def add_adherence_panel(ax, *, uptake_stats: dict, dose_stats: dict, dataset_label: str) -> None:
+def add_adherence_panel(ax, *, uptake_stats: dict, dose_stats: dict, title_label: str, axis_label: str) -> None:
     uptake_pct = (uptake_stats["within_ideal_range"] / uptake_stats["count"] * 100) if uptake_stats["count"] else 0
     dose_pct = (dose_stats["within_ideal_range"] / dose_stats["count"] * 100) if dose_stats["count"] else 0
 
     ax.set_facecolor("white")
     ax.set_xlim(0, 100)
     ax.set_ylim(-0.8, 1.8)
-    ax.set_title(f"{dataset_label}: Protocol Adherence", fontsize=13, fontweight="bold", loc="center")
+    ax.set_title(title_label, fontsize=13, fontweight="bold", loc="center")
 
     labels = [
         "Injection-to-scan time within 45-75 min",
@@ -345,7 +345,7 @@ def add_adherence_panel(ax, *, uptake_stats: dict, dose_stats: dict, dataset_lab
         )
 
     ax.set_yticks([])
-    ax.set_xlabel(f"Share of representative {dataset_label} studies", fontsize=10)
+    ax.set_xlabel(axis_label, fontsize=10)
     ax.grid(axis="x", color="#d1d5db", linewidth=0.8, alpha=0.7)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -353,7 +353,16 @@ def add_adherence_panel(ax, *, uptake_stats: dict, dose_stats: dict, dataset_lab
     ax.tick_params(axis="x", labelsize=9)
 
 
-def render_figure(payload: dict, output_path: Path, dataset_label: str) -> None:
+def render_figure(
+    payload: dict,
+    output_path: Path,
+    dataset_label: str,
+    *,
+    overall_title: str | None = None,
+    adherence_title: str | None = None,
+    adherence_axis_label: str | None = None,
+    include_dataset_in_hist_titles: bool = True,
+) -> None:
     plt.rcParams.update(
         {
             "font.family": "DejaVu Sans",
@@ -374,13 +383,19 @@ def render_figure(payload: dict, output_path: Path, dataset_label: str) -> None:
         adherence_ax,
         uptake_stats=payload["stats"]["uptake_time"],
         dose_stats=payload["stats"]["dose_per_kg"],
-        dataset_label=dataset_title,
+        title_label=adherence_title or f"{dataset_title}: Protocol Adherence",
+        axis_label=adherence_axis_label or f"Share of representative {dataset_title} studies",
     )
+    uptake_title = "Injection-to-Scan Time Distribution"
+    dose_title = "Injected Dose per kg Distribution"
+    if include_dataset_in_hist_titles:
+        uptake_title = f"{dataset_title}: {uptake_title}"
+        dose_title = f"{dataset_title}: {dose_title}"
     add_distribution_panel(
         uptake_ax,
         histogram=plot_data["uptake_histogram"],
         stats=payload["stats"]["uptake_time"],
-        title=f"{dataset_title}: Injection-to-Scan Time Distribution",
+        title=uptake_title,
         xlabel="Minutes after injection",
         ideal_label="Dashboard ideal",
         ideal_value=float(payload["stats"]["uptake_time"]["ideal"]),
@@ -396,7 +411,7 @@ def render_figure(payload: dict, output_path: Path, dataset_label: str) -> None:
         dose_ax,
         histogram=plot_data["dose_histogram"],
         stats=payload["stats"]["dose_per_kg"],
-        title=f"{dataset_title}: Injected Dose per kg Distribution",
+        title=dose_title,
         xlabel="Dose (MBq/kg)",
         ideal_label="Dashboard ideal",
         ideal_value=float(payload["stats"]["dose_per_kg"]["ideal"]),
@@ -409,7 +424,7 @@ def render_figure(payload: dict, output_path: Path, dataset_label: str) -> None:
         omitted_count=int(plot_data["dose_omitted"]),
     )
     fig.suptitle(
-        f"Dashboard-derived {dataset_title} representative-series distributions",
+        overall_title or f"Dashboard-derived {dataset_title} representative-series distributions",
         fontsize=14,
         fontweight="bold",
         color="black",
@@ -441,6 +456,26 @@ def main() -> None:
         default=None,
         help="Dataset label to use in the figure title. Defaults to a label derived from the database filename.",
     )
+    parser.add_argument(
+        "--overall-title",
+        default=None,
+        help="Optional full figure title override.",
+    )
+    parser.add_argument(
+        "--adherence-title",
+        default=None,
+        help="Optional adherence panel title override.",
+    )
+    parser.add_argument(
+        "--adherence-axis-label",
+        default=None,
+        help="Optional adherence panel x-axis label override.",
+    )
+    parser.add_argument(
+        "--plain-histogram-titles",
+        action="store_true",
+        help="Use histogram titles without the dataset label prefix.",
+    )
     args = parser.parse_args()
 
     db_path = args.db.resolve()
@@ -448,7 +483,15 @@ def main() -> None:
     dataset_label = args.label or default_dataset_label(db_path)
 
     payload = load_dashboard_payload(db_path)
-    render_figure(payload, output_path, dataset_label)
+    render_figure(
+        payload,
+        output_path,
+        dataset_label,
+        overall_title=args.overall_title,
+        adherence_title=args.adherence_title,
+        adherence_axis_label=args.adherence_axis_label,
+        include_dataset_in_hist_titles=not args.plain_histogram_titles,
+    )
     print(f"Wrote {output_path}")
 
 

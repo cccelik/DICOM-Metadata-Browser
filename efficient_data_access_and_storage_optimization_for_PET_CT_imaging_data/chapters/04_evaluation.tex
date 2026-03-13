@@ -1,34 +1,38 @@
  % Consolidated Chapter 4 (revised)
 \chapter{Evaluation}
-This chapter evaluates the system through an empirical assessment on four benchmark datasets available in the project environment: AnonAxilla, MIRROR\_A, PPA, and the public TCIA cohort LMU\_PSMA \cite{lmu_psma_tcia_2026}. In addition, a supervisor-provided anonymized databank from TUM Clinic is included as a supplementary case-analysis cohort. The measurements cover end-to-end and stage-level runtime, databank size and reduction factors, peak memory (RSS), structural counts, metadata completeness, and temporal-delay anomaly statistics. The evaluation reports performance together with quality behavior because both aspects shape practical usability: fast ingestion is less meaningful without usable metadata, while costly quality logic can make iterative use more difficult.
+This chapter evaluates the system through an empirical assessment on four benchmark datasets available in the project environment: AnonAxilla, MIRROR\_A, PPA, and the public TCIA cohort LMU\_PSMA \cite{lmu_psma_tcia_2026}. In addition, an anonymized TUM databank is included as a supplementary case-study cohort. The measurements cover end-to-end and stage-level runtime, databank size and reduction factors, peak memory (RSS), structural counts, metadata completeness, and temporal-delay anomaly statistics. The evaluation reports performance together with quality behavior because both aspects shape practical usability: fast ingestion is less meaningful without usable metadata, while costly quality logic can make iterative use more difficult.
 
 An additional dataset was originally planned for inclusion, namely the TCIA collection \emph{FDG-PET-CT-Lesions} (\url{https://www.cancerimagingarchive.net/collection/fdg-pet-ct-lesions/}). Access was unavailable during the project period due to TCIA's controlled-access transition, introduced in 2025 under NIH policy changes (including Guide Notice NOT-OD-25-083 and TCIA's controlled-access hosting sunset timeline). Consequently, the evaluation is limited to datasets that were accessible and processable locally. For context, TCIA remains a widely used public imaging repository for quantitative imaging research and benchmark development.
 
 \section{Dataset Structure and Characteristics}
 Because external readers do not have access to the local input folders used in this thesis, this section summarizes dataset structure, provenance, and analysis-relevant characteristics at a descriptive level.
 
-All datasets follow the standard DICOM hierarchy (Patient $\rightarrow$ Study $\rightarrow$ Series $\rightarrow$ Instance), but differ in scale, preprocessing history, and metadata readiness. Three anonymized data pools (AnonAxilla, MIRROR\_A, and PPA) were processed as local research subsets, LMU\_PSMA is a public TCIA collection \cite{lmu_psma_tcia_2026}, and TUM\_D50 is a supervisor-provided anonymized databank derived from a TUM Clinic source pool of approximately 5\,TB before processing. For comparability, each dataset is profiled by raw size, one-instance-per-series size, resulting databank size, and processed instance count where those values were available.
+All datasets follow the standard DICOM hierarchy (Patient $\rightarrow$ Study $\rightarrow$ Series $\rightarrow$ Instance), but differ in scale, preprocessing history, and metadata readiness. Three anonymized data pools (AnonAxilla, MIRROR\_A, and PPA) were processed as local research subsets, LMU\_PSMA is a public TCIA collection \cite{lmu_psma_tcia_2026}, and the additional TUM cohort is a supervisor-provided anonymized databank representing a mid-2025 snapshot from the clinical database at the TUM Klinikum rechts der Isar, acquired on a Siemens Vision PET/CT and derived from a source pool of approximately 5\,TB before processing. For comparability, each dataset is profiled by raw size, one-instance-per-series size, resulting databank size, and processed instance count where those values were available.
+
 
 \begin{table}[htbp]
 \centering
 \caption{Dataset profile summary for readers without direct dataset access.}
 \label{tab:dataset-profile-summary}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{l l r r r r}
+\small
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{@{}l >{\raggedright\arraybackslash}X r r r r@{}}
 \toprule
-Dataset & Provenance Category & Raw MB & One-instance-per-series MB & DB MB & Processed Instances\\
+Dataset & Provenance Category & Raw MB & \makecell[c]{One-instance-\\per-series MB} & DB MB & \makecell[c]{Processed\\Instances}\\
 \midrule
 AnonAxilla & Local anonymized subset & 219.55 & 49.81 & 2.15 & 130 \\
 MIRROR\_A  & Local anonymized subset & 30.89  & 30.77 & 1.64 & 45 \\
 PPA       & Local anonymized subset & 370.40 & 75.77 & 6.05 & 173 \\
 LMU\_PSMA & Public TCIA collection  & 117089.00 & 879.44 & 6.01 & 1791 \\
-TUM\_D50  & Supervisor-provided anonymized TUM Clinic databank & 5000000.00 & -- & 41.32 & 6343 \\
+Mid-2025 TUM snapshot  & TUM clinical snapshot (Siemens Vision PET/CT) & 5000000.00 & -- & 41.32 & 6343 \\
 \bottomrule
-\end{tabular}
-}
+\end{tabularx}
+\normalsize
 \end{table}
 
-Table~\ref{tab:dataset-profile-summary} suggests that scale alone is not a sufficient proxy for metadata readiness: temporal and radiopharmaceutical field availability varies markedly and influences QA interpretability and downstream analytic usability. For TUM\_D50, the databank file was received from the supervisor after processing the source pool and exporting it with the project's anonymized databank export feature. Consequently, the one-instance-per-series intermediate size and direct runtime benchmarks are not reported for that cohort.
+\FloatBarrier
+Table~\ref{tab:dataset-profile-summary} suggests that scale alone is not a sufficient proxy for metadata readiness: temporal and radiopharmaceutical field availability varies markedly and influences QA interpretability and downstream analytic usability. The TUM cohort was available only as a databank export produced with the project's anonymized export workflow after upstream processing by the supervisor. Consequently, the one-instance-per-series intermediate size and direct runtime benchmarks are not reported for that cohort.
 
 \section{Benchmark Commands}
 All runs used a consistent command structure:
@@ -281,17 +285,17 @@ To complement the aggregated results, this section turns to concrete dataset-lev
 
 All 597 representative LMU studies produced usable delay and dose values in the dashboard aggregation. The protocol-adherence summary shows that 326/597 studies (54.6\%) fall into the dashboard's uptake target band and 359/597 studies (60.1\%) into the dose target band. The scan-time-after-injection distribution is centered somewhat above the 60-minute reference (median 71.5\,min; mean 75.5\,min) and shows a visible right tail up to 195.1\,min, but without negative or $>$240-minute cases. The injected-dose-per-kilogram distribution is more tightly concentrated around the dashboard reference of 3.0\,MBq/kg (median 2.92\,MBq/kg; mean 2.89\,MBq/kg). Taken together, the adherence panel and the two distributions suggest broadly consistent acquisition practice with moderate real-world spread rather than strict protocol uniformity.
 
-The supplementary TUM\_D50 cohort provides a second dashboard-oriented view under a different provenance condition: unlike LMU\_PSMA, it entered the workspace only as an already processed anonymized databank, originating from a source pool of approximately 5\,TB. Figure~\ref{fig:tum-d50-dashboard-distributions} therefore does not extend the runtime benchmark set, but it does broaden the metadata-quality perspective by showing how the same dashboard aggregation behaves on a substantially larger anonymized clinical pool.
+The TUM cohort provides a second dashboard-oriented view under a different provenance condition: unlike LMU\_PSMA, it entered the workspace only as an already processed anonymized databank rather than as a benchmarkable input tree. Figure~\ref{fig:tum-d50-dashboard-distributions} therefore does not extend the runtime benchmark set, but it broadens the metadata-quality perspective by showing how the same dashboard aggregation behaves on a substantially larger clinical pool.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.96\textwidth]{graphs/d50_dashboard_distributions}
-\caption[TUM D50 dashboard protocol-adherence and distribution results]{Dashboard-derived TUM\_D50 protocol-adherence and distribution results. The figure combines the dashboard's adherence summary with the representative-series distributions for scan time after injection and injected dose per kilogram, using the same target ranges (45--75 minutes and 2.5--3.5\,MBq/kg).}
+\includegraphics[width=0.96\textwidth]{graphs/tum_mid_2025_snapshot_dashboard_distributions}
+\caption[Mid-2025 TUM clinical snapshot dashboard protocol-adherence and distribution results]{Dashboard-derived results for the TUM cohort. The figure combines the dashboard's adherence summary with the representative-series distributions for scan time after injection and injected dose per kilogram, using the same target ranges (45--75 minutes and 2.5--3.5\,MBq/kg).}
 \label{fig:tum-d50-dashboard-distributions}
 \end{figure}
 \FloatBarrier
 
-In TUM\_D50, the databank currently occupies 41.32\,MB on disk and stores 6343 processed instances spanning 792 representative studies. Of those, 480 representative studies produced usable uptake-time and dose-per-kilogram values in the dashboard aggregation. The adherence summary shows that 313/480 studies (65.2\%) fall into the uptake target band and 449/480 studies (93.5\%) into the dose target band. The uptake distribution is centered closer to the dashboard reference than in LMU\_PSMA (median 66.3\,min; mean 77.9\,min), but it also contains a small number of extreme long-delay outliers beyond the displayed histogram range. Dose-per-kilogram values are tightly concentrated near the 3.0\,MBq/kg reference (median 2.99\,MBq/kg; mean 3.13\,MBq/kg), with only a few high-end outliers excluded from the figure for readability. Taken together, this second case supports the broader claim that dashboard-level aggregation can remain informative even when a cohort is available only as an anonymized databank artifact rather than as a full benchmarkable input tree.
+The TUM databank currently occupies 41.32\,MB on disk and stores 6343 processed instances spanning 792 representative studies. Of those, 480 representative studies produced usable uptake-time and dose-per-kilogram values in the dashboard aggregation. The adherence summary shows that 313/480 studies (65.2\%) fall into the uptake target band and 449/480 studies (93.5\%) into the dose target band. The uptake distribution is centered closer to the dashboard reference than in LMU\_PSMA (median 66.3\,min; mean 77.9\,min), but it also contains a small number of extreme long-delay outliers beyond the displayed histogram range. Dose-per-kilogram values are tightly concentrated near the 3.0\,MBq/kg reference (median 2.99\,MBq/kg; mean 3.13\,MBq/kg), with only a few high-end outliers excluded from the figure for readability. Taken together, this case supports the broader claim that dashboard-level aggregation can remain informative even when a cohort is available only as an anonymized databank artifact rather than as a full benchmarkable input tree.
 
 Beyond this specific cohort view, several workflow-level observations also emerged during evaluation. Archive ingestion reduced manual preprocessing by integrating extraction and cleanup into a single run, even when datasets arrived in mixed formats. Staged discovery improved recall in heterogeneous filename environments compared with extension-only filtering, and the parse fallback for extensionless files was important for vendor-export edge cases. In provenance-oriented workflows, preserved private tags provided additional context for comparing scanner and pipeline behavior across cohorts; even without full semantic decoding, creator identifiers and fingerprints improved traceability.
 
