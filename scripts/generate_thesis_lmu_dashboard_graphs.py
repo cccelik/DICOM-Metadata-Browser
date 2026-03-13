@@ -308,14 +308,14 @@ def add_distribution_panel(
     )
 
 
-def add_adherence_panel(ax, *, uptake_stats: dict, dose_stats: dict) -> None:
+def add_adherence_panel(ax, *, uptake_stats: dict, dose_stats: dict, dataset_label: str) -> None:
     uptake_pct = (uptake_stats["within_ideal_range"] / uptake_stats["count"] * 100) if uptake_stats["count"] else 0
     dose_pct = (dose_stats["within_ideal_range"] / dose_stats["count"] * 100) if dose_stats["count"] else 0
 
     ax.set_facecolor("white")
     ax.set_xlim(0, 100)
     ax.set_ylim(-0.8, 1.8)
-    ax.set_title("LMU_PSMA: Protocol Adherence", fontsize=13, fontweight="bold", loc="center")
+    ax.set_title(f"{dataset_label}: Protocol Adherence", fontsize=13, fontweight="bold", loc="center")
 
     labels = [
         "Injection-to-scan time within 45-75 min",
@@ -345,7 +345,7 @@ def add_adherence_panel(ax, *, uptake_stats: dict, dose_stats: dict) -> None:
         )
 
     ax.set_yticks([])
-    ax.set_xlabel("Share of representative LMU studies", fontsize=10)
+    ax.set_xlabel(f"Share of representative {dataset_label} studies", fontsize=10)
     ax.grid(axis="x", color="#d1d5db", linewidth=0.8, alpha=0.7)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -369,12 +369,13 @@ def render_figure(payload: dict, output_path: Path, dataset_label: str) -> None:
     fig.patch.set_facecolor("white")
     plot_data = payload["_plot_data"]
 
+    dataset_title = dataset_label or "Dashboard"
     add_adherence_panel(
         adherence_ax,
         uptake_stats=payload["stats"]["uptake_time"],
         dose_stats=payload["stats"]["dose_per_kg"],
+        dataset_label=dataset_title,
     )
-    dataset_title = dataset_label or "Dashboard"
     add_distribution_panel(
         uptake_ax,
         histogram=plot_data["uptake_histogram"],
