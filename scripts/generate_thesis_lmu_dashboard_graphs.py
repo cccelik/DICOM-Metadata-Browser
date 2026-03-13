@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Generate thesis figures from the LMU dashboard analytics payload."""
+"""Generate dashboard distribution figures from a databank analytics payload."""
 
 from __future__ import annotations
 
+import argparse
+import math
 import os
 import sqlite3
 import sys
@@ -22,6 +24,7 @@ from dicom_browser.dashboard_service import build_dashboard_payload
 from dicom_browser.export_utils import calculate_injection_delay
 from webui import (
     compute_delay_status,
+    compute_dose_from_row,
     has_radiopharm,
     has_time_conflict,
     load_representative_series,
@@ -39,6 +42,137 @@ LIGHT_BLUE = "#dbeafe"
 ORANGE_FILL = "#f4a261"
 ORANGE_LIGHT = "#f6d7b0"
 ORANGE_EDGE = "#c96f1a"
+
+
+def default_dataset_label(db_path: Path) -> str:
+    stem = db_path.stem
+    if stem.endswith(".D50"):
+        return stem.rsplit(".", 1)[-1]
+    if stem.startswith("dicom_metadata_"):
+        stem = stem.removeprefix("dicom_metadata_")
+    elif stem.startswith("dicom_metadata"):
+        stem = stem.removeprefix("dicom_metadata")
+    cleaned = stem.strip("._-")
+    return cleaned or db_path.stem
+
+
+def percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
+        raise ValueError("percentile() requires at least one value")
+    if len(ordered) == 1:
+        return ordered[0]
+    position = (len(ordered) - 1) * fraction
+    lower_index = int(math.floor(position))
+    upper_index = int(math.ceil(position))
+    if lower_index == upper_index:
+        return ordered[lower_index]
+    lower = ordered[lower_index]
+    upper = ordered[upper_index]
+    weight = position - lower_index
+    return lower + (upper - lower) * weight
+
+
+def round_up(value: float, step: float) -> float:
+    return math.ceil(value / step) * step
+
+
+def choose_plot_max(
+    values: list[float],
+    *,
+    percentile_fraction: float,
+    headroom: float,
+    step: float,
+    min_limit: float,
+    max_limit: float,
+) -> float:
+    if not values:
+        return max_limit
+    robust_max = percentile(values, percentile_fraction) * headroom
+    return min(max(round_up(robust_max, step), min_limit), max_limit)
+
+
+def create_plot_histogram(
+    values: list[float],
+    *,
+    max_val: float,
+    precision: int,
+    bin_width: float,
+) -> tuple[dict, int]:
+    if not values:
+        return {"labels": [], "values": []}, 0
+
+    bins = max(1, int(math.ceil(max_val / bin_width)))
+    histogram = [0] * bins
+    labels = [f"{i * bin_width:.{precision}f}" for i in range(bins)]
+    omitted = 0
+
+    for raw_value in values:
+        value = float(raw_value)
+        if value < 0:
+            continue
+        if value > max_val:
+            omitted += 1
+            continue
+        bin_index = min(int(value / bin_width), bins - 1)
+        histogram[bin_index] += 1
+
+    return {"labels": labels, "values": histogram}, omitted
+
+
+def collect_plot_data(representative_series_rows: list[dict]) -> dict:
+    uptake_values = []
+    dose_values = []
+
+    for row in representative_series_rows:
+        delay_minutes, _status = compute_delay_status(row)
+        if delay_minutes is not None and delay_minutes > 0:
+            uptake_values.append(float(delay_minutes))
+
+        dose_per_kg, _ = compute_dose_from_row(row)
+        if dose_per_kg is not None and 0 < dose_per_kg < 100:
+            dose_values.append(float(dose_per_kg))
+
+    uptake_plot_max = choose_plot_max(
+        uptake_values,
+        percentile_fraction=0.99,
+        headroom=1.15,
+        step=15.0,
+        min_limit=120.0,
+        max_limit=240.0,
+    )
+    dose_plot_max = choose_plot_max(
+        dose_values,
+        percentile_fraction=0.99,
+        headroom=1.10,
+        step=0.5,
+        min_limit=4.0,
+        max_limit=8.0,
+    )
+
+    uptake_histogram, uptake_omitted = create_plot_histogram(
+        uptake_values,
+        max_val=uptake_plot_max,
+        precision=1,
+        bin_width=5.0,
+    )
+    dose_histogram, dose_omitted = create_plot_histogram(
+        dose_values,
+        max_val=dose_plot_max,
+        precision=2,
+        bin_width=0.1,
+    )
+
+    return {
+        "uptake_values": uptake_values,
+        "dose_values": dose_values,
+        "uptake_histogram": uptake_histogram,
+        "dose_histogram": dose_histogram,
+        "uptake_plot_max": uptake_plot_max,
+        "dose_plot_max": dose_plot_max,
+        "uptake_omitted": uptake_omitted,
+        "dose_omitted": dose_omitted,
+    }
 
 
 def load_dashboard_payload(db_path: Path) -> dict:
@@ -86,7 +220,7 @@ def load_dashboard_payload(db_path: Path) -> dict:
     finally:
         conn.close()
 
-    return build_dashboard_payload(
+    payload = build_dashboard_payload(
         study_summary=study_summary,
         study_modalities=study_modalities,
         representative_series_rows=representative_series_rows,
@@ -97,6 +231,8 @@ def load_dashboard_payload(db_path: Path) -> dict:
         has_time_conflict=has_time_conflict,
         has_radiopharm=has_radiopharm,
     )
+    payload["_plot_data"] = collect_plot_data(representative_series_rows)
+    return payload
 
 
 def histogram_positions(histogram: dict) -> tuple[list[float], float]:
@@ -122,6 +258,8 @@ def add_distribution_panel(
     bar_edge: str,
     band_fill: str,
     decimals: int,
+    x_limit: float,
+    omitted_count: int,
 ) -> None:
     x_positions, bin_width = histogram_positions(histogram)
     values = histogram["values"]
@@ -142,6 +280,7 @@ def add_distribution_panel(
     ax.set_title(title, fontsize=12, fontweight="bold", loc="center")
     ax.set_xlabel(xlabel, fontsize=10)
     ax.set_ylabel("Study count", fontsize=10)
+    ax.set_xlim(0, x_limit)
     ax.grid(axis="y", color="#d1d5db", linewidth=0.8, alpha=0.7, zorder=1)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -155,6 +294,8 @@ def add_distribution_panel(
         f"Range: {stats['min']:.{decimals}f}-{stats['max']:.{decimals}f}\n"
         f"Within target: {stats['within_ideal_range']}/{stats['count']} ({within_pct:.1f}%)"
     )
+    if omitted_count:
+        summary += f"\nExcluded beyond displayed range: {omitted_count}"
     ax.text(
         0.985,
         0.97,
@@ -212,7 +353,7 @@ def add_adherence_panel(ax, *, uptake_stats: dict, dose_stats: dict) -> None:
     ax.tick_params(axis="x", labelsize=9)
 
 
-def render_figure(payload: dict, output_path: Path) -> None:
+def render_figure(payload: dict, output_path: Path, dataset_label: str) -> None:
     plt.rcParams.update(
         {
             "font.family": "DejaVu Sans",
@@ -226,17 +367,19 @@ def render_figure(payload: dict, output_path: Path) -> None:
     uptake_ax = fig.add_subplot(grid[1, 0])
     dose_ax = fig.add_subplot(grid[1, 1])
     fig.patch.set_facecolor("white")
+    plot_data = payload["_plot_data"]
 
     add_adherence_panel(
         adherence_ax,
         uptake_stats=payload["stats"]["uptake_time"],
         dose_stats=payload["stats"]["dose_per_kg"],
     )
+    dataset_title = dataset_label or "Dashboard"
     add_distribution_panel(
         uptake_ax,
-        histogram=payload["uptake_histogram"],
+        histogram=plot_data["uptake_histogram"],
         stats=payload["stats"]["uptake_time"],
-        title="LMU_PSMA: Injection-to-Scan Time Distribution",
+        title=f"{dataset_title}: Injection-to-Scan Time Distribution",
         xlabel="Minutes after injection",
         ideal_label="Dashboard ideal",
         ideal_value=float(payload["stats"]["uptake_time"]["ideal"]),
@@ -245,12 +388,14 @@ def render_figure(payload: dict, output_path: Path) -> None:
         bar_edge=PRIMARY_BLUE,
         band_fill=LIGHT_BLUE,
         decimals=1,
+        x_limit=float(plot_data["uptake_plot_max"]),
+        omitted_count=int(plot_data["uptake_omitted"]),
     )
     add_distribution_panel(
         dose_ax,
-        histogram=payload["dose_histogram"],
+        histogram=plot_data["dose_histogram"],
         stats=payload["stats"]["dose_per_kg"],
-        title="LMU_PSMA: Injected Dose per kg Distribution",
+        title=f"{dataset_title}: Injected Dose per kg Distribution",
         xlabel="Dose (MBq/kg)",
         ideal_label="Dashboard ideal",
         ideal_value=float(payload["stats"]["dose_per_kg"]["ideal"]),
@@ -259,9 +404,11 @@ def render_figure(payload: dict, output_path: Path) -> None:
         bar_edge=ORANGE_EDGE,
         band_fill=ORANGE_LIGHT,
         decimals=2,
+        x_limit=float(plot_data["dose_plot_max"]),
+        omitted_count=int(plot_data["dose_omitted"]),
     )
     fig.suptitle(
-        "Dashboard-derived LMU representative-series distributions",
+        f"Dashboard-derived {dataset_title} representative-series distributions",
         fontsize=14,
         fontweight="bold",
         color="black",
@@ -273,9 +420,35 @@ def render_figure(payload: dict, output_path: Path) -> None:
 
 
 def main() -> None:
-    payload = load_dashboard_payload(DEFAULT_DB)
-    render_figure(payload, OUTPUT_PATH)
-    print(f"Wrote {OUTPUT_PATH}")
+    parser = argparse.ArgumentParser(
+        description="Generate dashboard adherence and distribution histograms from a databank."
+    )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DB,
+        help=f"SQLite databank to visualize (default: {DEFAULT_DB})",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=OUTPUT_PATH,
+        help=f"Output PNG path (default: {OUTPUT_PATH})",
+    )
+    parser.add_argument(
+        "--label",
+        default=None,
+        help="Dataset label to use in the figure title. Defaults to a label derived from the database filename.",
+    )
+    args = parser.parse_args()
+
+    db_path = args.db.resolve()
+    output_path = args.output.resolve()
+    dataset_label = args.label or default_dataset_label(db_path)
+
+    payload = load_dashboard_payload(db_path)
+    render_figure(payload, output_path, dataset_label)
+    print(f"Wrote {output_path}")
 
 
 if __name__ == "__main__":

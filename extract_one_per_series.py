@@ -7,6 +7,7 @@ Series is inferred as the directory that directly contains DICOM files.
 import argparse
 import os
 import shutil
+import time
 from pathlib import Path
 
 from dicom_browser.dicom_discovery import is_dicom_candidate
@@ -57,6 +58,7 @@ def copy_samples(samples, input_root: Path, output_root: Path) -> int:
 
 
 def main() -> None:
+    start_time = time.perf_counter()
     parser = argparse.ArgumentParser(
         description="Extract one DICOM file per series directory."
     )
@@ -73,10 +75,12 @@ def main() -> None:
     samples = find_series_samples(input_root)
     if not samples:
         print("No DICOM files found.")
+        print(f"Elapsed time: {time.perf_counter() - start_time:.2f} seconds")
         return
 
     copied = copy_samples(samples, input_root, output_root)
     print(f"Copied {copied} series samples into {output_root}")
+    print(f"Elapsed time: {time.perf_counter() - start_time:.2f} seconds")
 
 
 if __name__ == "__main__":
