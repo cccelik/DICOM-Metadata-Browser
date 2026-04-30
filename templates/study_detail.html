@@ -318,6 +318,7 @@
             display: flex;
             align-items: center;
             gap: 12px;
+            flex-wrap: wrap;
         }
 
         .export-button {
@@ -344,6 +345,67 @@
             background: #177564;
         }
 
+        .study-transfer-panel {
+            background: white;
+            padding: 16px 18px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: none;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .study-transfer-panel.open {
+            display: flex;
+        }
+
+        .transfer-control {
+            min-width: 190px;
+            padding: 9px 10px;
+            border: 1px solid #d7dde4;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .transfer-button {
+            border: none;
+            border-radius: 6px;
+            padding: 9px 12px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            background: #1f4b99;
+            color: #fff;
+        }
+
+        .transfer-button.secondary {
+            background: #ecf0f1;
+            color: #2c3e50;
+        }
+
+        body.dark .study-transfer-panel {
+            background: #141c26;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.35);
+        }
+
+        body.dark .transfer-control {
+            background: #0f141b;
+            border-color: #2a3b52;
+            color: #e6edf3;
+        }
+
+        body.dark .transfer-button {
+            background: #4e85e9;
+            color: #0b1320;
+        }
+
+        body.dark .transfer-button.secondary {
+            background: #1e2936;
+            color: #e6edf3;
+        }
+
     </style>
     {% include "partials/top_bar/styles.html" %}
     {% include "partials/modals/export/styles.html" %}
@@ -360,6 +422,9 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <a href="/?db={{ db_name }}&lang={{ lang }}" class="back-link">← {{ t.back_to_studies }}</a>
             <div class="action-buttons">
+                <button type="button" id="show-study-transfer" class="transfer-button secondary">
+                    {{ t.copy_move_study or 'Copy/Move Study' }}
+                </button>
                 <button type="button" id="export-csv-button" class="export-button">
                     {{ t.export_csv }}
                 </button>
@@ -374,6 +439,30 @@
                     </button>
                 </form>
             </div>
+        </div>
+        <div class="study-transfer-panel" id="study-transfer-panel">
+            <select class="transfer-control" id="study-detail-transfer-action" aria-label="{{ t.transfer_action or 'Transfer action' }}">
+                <option value="copy">{{ t.copy_to_databank or 'Copy to databank' }}</option>
+                <option value="move">{{ t.move_to_databank or 'Move to databank' }}</option>
+            </select>
+            <select class="transfer-control" id="study-detail-target-existing" aria-label="{{ t.target_databank or 'Target databank' }}">
+                <option value="__new__">{{ t.new_databank or 'New databank' }}</option>
+                {% for bank in databanks %}
+                {% if bank != db_name %}
+                <option value="{{ bank }}">{{ bank }}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+            <input
+                type="text"
+                class="transfer-control"
+                id="study-detail-target-new"
+                placeholder="{{ t.new_databank_name or 'New databank name' }}"
+                aria-label="{{ t.new_databank_name or 'New databank name' }}"
+            >
+            <button type="button" class="transfer-button" id="study-detail-transfer-submit">
+                {{ t.apply_transfer or 'Apply' }}
+            </button>
         </div>
         
         <div class="header-section">
@@ -1141,6 +1230,72 @@
                     triggerEl.textContent = triggerEl.dataset.show || 'Show Details';
                 }
             }
+        }
+
+        const showStudyTransfer = document.getElementById('show-study-transfer');
+        const studyTransferPanel = document.getElementById('study-transfer-panel');
+        const studyDetailTransferAction = document.getElementById('study-detail-transfer-action');
+        const studyDetailTargetExisting = document.getElementById('study-detail-target-existing');
+        const studyDetailTargetNew = document.getElementById('study-detail-target-new');
+        const studyDetailTransferSubmit = document.getElementById('study-detail-transfer-submit');
+
+        function updateStudyDetailTargetInput() {
+            const useNewTarget = !studyDetailTargetExisting || studyDetailTargetExisting.value === '__new__';
+            if (studyDetailTargetNew) {
+                studyDetailTargetNew.style.display = useNewTarget ? '' : 'none';
+            }
+        }
+
+        if (showStudyTransfer && studyTransferPanel) {
+            showStudyTransfer.addEventListener('click', () => {
+                studyTransferPanel.classList.toggle('open');
+            });
+        }
+
+        if (studyDetailTargetExisting) {
+            studyDetailTargetExisting.addEventListener('change', updateStudyDetailTargetInput);
+            updateStudyDetailTargetInput();
+        }
+
+        if (studyDetailTransferSubmit) {
+            studyDetailTransferSubmit.addEventListener('click', () => {
+                const targetName = studyDetailTargetExisting && studyDetailTargetExisting.value !== '__new__'
+                    ? studyDetailTargetExisting.value
+                    : (studyDetailTargetNew ? studyDetailTargetNew.value.trim() : '');
+                const action = studyDetailTransferAction ? studyDetailTransferAction.value : 'copy';
+                if (!targetName) {
+                    alert('{{ t.copy_target_required or "Enter a new databank name." }}');
+                    return;
+                }
+
+                const originalText = studyDetailTransferSubmit.textContent;
+                const formData = new FormData();
+                formData.append('db', '{{ db_name }}');
+                formData.append('target_name', targetName);
+                formData.append('action', action);
+                formData.append('study_uids', '{{ study_info.study_instance_uid }}');
+                studyDetailTransferSubmit.disabled = true;
+                studyDetailTransferSubmit.textContent = '{{ t.copying_studies or "Copying..." }}';
+
+                fetch('/databanks/copy-studies', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok || !data.success) {
+                        throw new Error(data.message || '{{ t.copy_failed or "Failed to copy studies." }}');
+                    }
+                    window.location.href = action === 'move'
+                        ? `/?db=${encodeURIComponent('{{ db_name }}')}&lang={{ lang }}`
+                        : `/study/{{ study_info.study_instance_uid }}?db=${encodeURIComponent(data.name)}&lang={{ lang }}`;
+                })
+                .catch(error => {
+                    alert(error.message || '{{ t.copy_failed or "Failed to copy studies." }}');
+                    studyDetailTransferSubmit.disabled = false;
+                    studyDetailTransferSubmit.textContent = originalText;
+                });
+            });
         }
     </script>
     {% include "partials/create_databank_script.html" %}

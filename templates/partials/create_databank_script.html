@@ -37,6 +37,30 @@
         modal.setAttribute('aria-hidden', 'true');
     }
 
+    function renameDatabank(currentName) {
+        const modal = document.getElementById('rename-db-modal');
+        const current = document.getElementById('rename-db-current');
+        const input = document.getElementById('rename-db-name');
+        if (!modal || !input || !current) {
+            return;
+        }
+        current.value = currentName || '{{ db_name }}';
+        input.value = current.value.replace(/\.db$/i, '');
+        modal.classList.add('active');
+        modal.setAttribute('aria-hidden', 'false');
+        setTimeout(() => input.focus(), 0);
+        closeAnyHamburgerMenu();
+    }
+
+    function closeRenameDb() {
+        const modal = document.getElementById('rename-db-modal');
+        if (!modal) {
+            return;
+        }
+        modal.classList.remove('active');
+        modal.setAttribute('aria-hidden', 'true');
+    }
+
     function submitCreateDb() {
         const input = document.getElementById('create-db-name');
         const name = input ? input.value.trim() : '';
@@ -68,8 +92,40 @@
         });
     }
 
+    function submitRenameDb() {
+        const current = document.getElementById('rename-db-current');
+        const input = document.getElementById('rename-db-name');
+        const currentName = current ? current.value.trim() : '';
+        const newName = input ? input.value.trim() : '';
+        if (!currentName || !newName) {
+            return;
+        }
+        const formData = new FormData();
+        formData.append('db', currentName);
+        formData.append('new_name', newName);
+        fetch('/databanks/rename', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json().then(data => ({ ok: response.ok, data })))
+        .then(({ ok, data }) => {
+            if (!ok || !data.success) {
+                throw new Error(data.message || 'Failed to rename databank.');
+            }
+            const urlParams = new URLSearchParams(window.location.search);
+            const lang = urlParams.get('lang') || '{{ lang }}' || 'en';
+            window.location.href = `/?db=${encodeURIComponent(data.name)}&lang=${encodeURIComponent(lang)}`;
+        })
+        .catch(error => {
+            alert(error.message || 'Failed to rename databank.');
+        })
+        .finally(() => {
+            closeRenameDb();
+        });
+    }
+
     function bindCreateDatabankButtons() {
-        document.querySelectorAll('.databank-create').forEach((button) => {
+        document.querySelectorAll('[data-create-databank]').forEach((button) => {
             button.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -80,8 +136,12 @@
 
     document.addEventListener('click', (event) => {
         const modal = document.getElementById('create-db-modal');
+        const renameModal = document.getElementById('rename-db-modal');
         if (modal && event.target === modal) {
             closeCreateDb();
+        }
+        if (renameModal && event.target === renameModal) {
+            closeRenameDb();
         }
     });
 
@@ -91,4 +151,7 @@
     window.createDatabank = createDatabank;
     window.closeCreateDb = closeCreateDb;
     window.submitCreateDb = submitCreateDb;
+    window.renameDatabank = renameDatabank;
+    window.closeRenameDb = closeRenameDb;
+    window.submitRenameDb = submitRenameDb;
 </script>

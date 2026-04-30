@@ -567,6 +567,213 @@ def create_databank():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@app.route('/databanks/rename', methods=['POST'])
+def rename_databank():
+    old_db_name = normalize_db_name(request.form.get("db"))
+    new_db_name = normalize_db_name(request.form.get("new_name"))
+    old_db_path = resolve_db_path(old_db_name)
+    new_db_path = resolve_db_path(new_db_name)
+
+    if not os.path.exists(old_db_path):
+        return jsonify({"success": False, "message": "Databank not found."}), 404
+    if old_db_name == new_db_name:
+        return jsonify({"success": False, "message": "Choose a different databank name."}), 400
+    if os.path.exists(new_db_path):
+        return jsonify({"success": False, "message": "A databank with that name already exists."}), 409
+
+    sidecars = [
+        (old_db_path, new_db_path),
+        (f"{old_db_path}-wal", f"{new_db_path}-wal"),
+        (f"{old_db_path}-shm", f"{new_db_path}-shm"),
+    ]
+    try:
+        os.replace(old_db_path, new_db_path)
+        for old_sidecar, new_sidecar in sidecars[1:]:
+            if os.path.exists(old_sidecar):
+                os.replace(old_sidecar, new_sidecar)
+        return jsonify({"success": True, "name": new_db_name})
+    except Exception as exc:
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+
+def _quote_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _table_exists(conn: sqlite3.Connection, schema: str, table_name: str) -> bool:
+    cursor = conn.execute(
+        f"SELECT name FROM {_quote_identifier(schema)}.sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _table_columns(conn: sqlite3.Connection, schema: str, table_name: str) -> List[str]:
+    cursor = conn.execute(f"PRAGMA {_quote_identifier(schema)}.table_info({_quote_identifier(table_name)})")
+    return [str(row[1]) for row in cursor.fetchall()]
+
+
+def _delete_studies_from_connection(conn: sqlite3.Connection, study_uids: List[str]) -> dict:
+    unique_study_uids = list(dict.fromkeys(uid.strip() for uid in study_uids if uid and uid.strip()))
+    if not unique_study_uids:
+        return {"deleted_metadata_rows": 0, "deleted_private_tag_rows": 0}
+    placeholders = ", ".join(["?"] * len(unique_study_uids))
+    private_rows = 0
+    if _table_exists(conn, "main", "private_tag"):
+        private_cursor = conn.execute(
+            f"DELETE FROM private_tag WHERE study_instance_uid IN ({placeholders})",
+            unique_study_uids,
+        )
+        private_rows = int(private_cursor.rowcount or 0)
+    metadata_cursor = conn.execute(
+        f"DELETE FROM dicom_metadata WHERE study_instance_uid IN ({placeholders})",
+        unique_study_uids,
+    )
+    return {
+        "deleted_metadata_rows": int(metadata_cursor.rowcount or 0),
+        "deleted_private_tag_rows": private_rows,
+    }
+
+
+def _compact_sqlite_database(conn: sqlite3.Connection) -> None:
+    conn.execute("VACUUM")
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except sqlite3.Error:
+        pass
+
+
+def copy_studies_to_databank(source_db_path: str, target_db_path: str, study_uids: List[str]) -> dict:
+    unique_study_uids = list(dict.fromkeys(uid.strip() for uid in study_uids if uid and uid.strip()))
+    if not unique_study_uids:
+        raise ValueError("No studies selected.")
+
+    target_conn = init_database(target_db_path, optimize=False)
+    try:
+        target_conn.execute("ATTACH DATABASE ? AS source_db", (source_db_path,))
+        placeholders = ", ".join(["?"] * len(unique_study_uids))
+        source_count = target_conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT study_instance_uid)
+            FROM source_db.dicom_metadata
+            WHERE study_instance_uid IN ({placeholders})
+            """,
+            unique_study_uids,
+        ).fetchone()[0]
+        if source_count == 0:
+            raise ValueError("Selected studies were not found in the source databank.")
+
+        target_cols = set(_table_columns(target_conn, "main", "dicom_metadata"))
+        source_cols = _table_columns(target_conn, "source_db", "dicom_metadata")
+        copy_cols = [col for col in source_cols if col != "id" and col in target_cols]
+        if "study_instance_uid" not in copy_cols:
+            raise ValueError("Source databank has no study UID column.")
+
+        col_sql = ", ".join(_quote_identifier(col) for col in copy_cols)
+        source_col_sql = ", ".join(f"source_db.dicom_metadata.{_quote_identifier(col)}" for col in copy_cols)
+        before_changes = target_conn.total_changes
+        target_conn.execute(
+            f"""
+            INSERT OR IGNORE INTO main.dicom_metadata ({col_sql})
+            SELECT {source_col_sql}
+            FROM source_db.dicom_metadata
+            WHERE source_db.dicom_metadata.study_instance_uid IN ({placeholders})
+            """,
+            unique_study_uids,
+        )
+        metadata_rows = target_conn.total_changes - before_changes
+
+        private_rows = 0
+        if _table_exists(target_conn, "main", "private_tag") and _table_exists(target_conn, "source_db", "private_tag"):
+            target_private_cols = set(_table_columns(target_conn, "main", "private_tag"))
+            source_private_cols = _table_columns(target_conn, "source_db", "private_tag")
+            private_copy_cols = [col for col in source_private_cols if col != "id" and col in target_private_cols]
+            if "study_instance_uid" in private_copy_cols:
+                private_col_sql = ", ".join(_quote_identifier(col) for col in private_copy_cols)
+                private_source_col_sql = ", ".join(
+                    f"source_db.private_tag.{_quote_identifier(col)}" for col in private_copy_cols
+                )
+                before_private_changes = target_conn.total_changes
+                target_conn.execute(
+                    f"""
+                    INSERT OR IGNORE INTO main.private_tag ({private_col_sql})
+                    SELECT {private_source_col_sql}
+                    FROM source_db.private_tag
+                    WHERE source_db.private_tag.study_instance_uid IN ({placeholders})
+                    """,
+                    unique_study_uids,
+                )
+                private_rows = target_conn.total_changes - before_private_changes
+
+        target_conn.commit()
+        return {
+            "study_count": int(source_count),
+            "metadata_rows": int(metadata_rows),
+            "private_tag_rows": int(private_rows),
+        }
+    finally:
+        try:
+            target_conn.execute("DETACH DATABASE source_db")
+        except sqlite3.Error:
+            pass
+        target_conn.close()
+
+
+def transfer_studies_between_databanks(
+    source_db_path: str,
+    target_db_path: str,
+    study_uids: List[str],
+    action: str,
+) -> dict:
+    if action not in {"copy", "move"}:
+        raise ValueError("Choose copy or move.")
+    result = copy_studies_to_databank(source_db_path, target_db_path, study_uids)
+    if action == "move":
+        source_conn = get_db_connection(source_db_path)
+        try:
+            delete_result = _delete_studies_from_connection(source_conn, study_uids)
+            source_conn.commit()
+            _compact_sqlite_database(source_conn)
+            result.update(delete_result)
+        finally:
+            source_conn.close()
+    return result
+
+
+@app.route('/databanks/copy-studies', methods=['POST'])
+def copy_studies_databank():
+    source_db_name = normalize_db_name(request.form.get("db"))
+    target_db_name = normalize_db_name(request.form.get("target_name"))
+    source_db_path = resolve_db_path(source_db_name)
+    target_db_path = resolve_db_path(target_db_name)
+    study_uids = request.form.getlist("study_uids")
+    action = request.form.get("action", "copy")
+    target_exists = os.path.exists(target_db_path)
+
+    if not os.path.exists(source_db_path):
+        return jsonify({"success": False, "message": "Source databank not found."}), 404
+    if source_db_name == target_db_name:
+        return jsonify({"success": False, "message": "Choose a different databank name."}), 400
+
+    try:
+        result = transfer_studies_between_databanks(source_db_path, target_db_path, study_uids, action)
+        return jsonify({"success": True, "name": target_db_name, "action": action, **result})
+    except ValueError as exc:
+        if not target_exists and os.path.exists(target_db_path):
+            try:
+                os.remove(target_db_path)
+            except OSError:
+                pass
+        return jsonify({"success": False, "message": str(exc)}), 400
+    except Exception as exc:
+        if not target_exists and os.path.exists(target_db_path):
+            try:
+                os.remove(target_db_path)
+            except OSError:
+                pass
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+
 @app.route('/databanks/export-anonymized')
 def export_anonymized_databank():
     db_name = normalize_db_name(request.args.get("db"))
@@ -1687,12 +1894,10 @@ def delete_study(study_uid):
             return f"Study not found: {study_uid}", 404
 
         # Delete all series in this study
-        cursor = conn.execute(
-            "DELETE FROM dicom_metadata WHERE study_instance_uid = ?",
-            (study_uid,)
-        )
-        deleted_count = cursor.rowcount
+        delete_result = _delete_studies_from_connection(conn, [study_uid])
+        deleted_count = delete_result["deleted_metadata_rows"]
         conn.commit()
+        _compact_sqlite_database(conn)
         conn.close()
 
         # Redirect back to index page with success message

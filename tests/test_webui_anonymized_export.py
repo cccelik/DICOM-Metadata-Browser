@@ -295,6 +295,169 @@ class WebUiAnonymizedExportTests(unittest.TestCase):
                 self.assertEqual(rows[0], ["Patientenname"])
                 response.close()
 
+    def test_copy_selected_studies_creates_filtered_databank(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_dir = Path(td)
+            source_path = db_dir / "source.db"
+            conn = store_metadata.init_database(str(source_path), optimize=False)
+            conn.executemany(
+                """
+                INSERT INTO dicom_metadata (
+                    patient_name, patient_id, study_instance_uid, series_instance_uid, sop_instance_uid, modality
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    ("Doe^Jane", "PAT-1", "STUDY-1", "SERIES-1", "SOP-1", "PT"),
+                    ("Doe^Jane", "PAT-1", "STUDY-1", "SERIES-2", "SOP-2", "CT"),
+                    ("Roe^John", "PAT-2", "STUDY-2", "SERIES-3", "SOP-3", "MR"),
+                ],
+            )
+            conn.execute(
+                """
+                INSERT INTO private_tag (
+                    sop_instance_uid, series_instance_uid, study_instance_uid,
+                    file_path, creator, group_hex, element_hex, value_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("SOP-1", "SERIES-1", "STUDY-1", "file.dcm", "CREATOR", "0019", "1001", "hash-1"),
+            )
+            conn.commit()
+            conn.close()
+
+            with patch.object(webui, "DATABANK_DIR", db_dir):
+                client = webui.app.test_client()
+                response = client.post(
+                    "/databanks/copy-studies",
+                    data={
+                        "db": "source.db",
+                        "target_name": "filtered",
+                        "study_uids": ["STUDY-1"],
+                    },
+                )
+                self.assertEqual(response.status_code, 200, response.status)
+                payload = response.get_json()
+                self.assertTrue(payload["success"])
+                self.assertEqual(payload["name"], "filtered.db")
+                self.assertEqual(payload["study_count"], 1)
+                self.assertEqual(payload["metadata_rows"], 2)
+                self.assertEqual(payload["private_tag_rows"], 1)
+
+                copied = sqlite3.connect(str(db_dir / "filtered.db"))
+                copied_rows = copied.execute(
+                    "SELECT study_instance_uid, series_instance_uid FROM dicom_metadata ORDER BY series_instance_uid"
+                ).fetchall()
+                self.assertEqual(copied_rows, [("STUDY-1", "SERIES-1"), ("STUDY-1", "SERIES-2")])
+                private_count = copied.execute("SELECT COUNT(*) FROM private_tag").fetchone()[0]
+                self.assertEqual(private_count, 1)
+                copied.close()
+
+    def test_copy_selected_studies_can_use_existing_target(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_dir = Path(td)
+            source_conn = store_metadata.init_database(str(db_dir / "source.db"), optimize=False)
+            source_conn.execute(
+                """
+                INSERT INTO dicom_metadata (
+                    patient_name, patient_id, study_instance_uid, series_instance_uid, sop_instance_uid, modality
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("Doe^Jane", "PAT-1", "STUDY-1", "SERIES-1", "SOP-1", "PT"),
+            )
+            source_conn.commit()
+            source_conn.close()
+            target_conn = store_metadata.init_database(str(db_dir / "target.db"), optimize=False)
+            target_conn.close()
+
+            with patch.object(webui, "DATABANK_DIR", db_dir):
+                client = webui.app.test_client()
+                response = client.post(
+                    "/databanks/copy-studies",
+                    data={
+                        "db": "source.db",
+                        "target_name": "target.db",
+                        "study_uids": ["STUDY-1"],
+                    },
+                )
+                self.assertEqual(response.status_code, 200, response.status)
+                copied = sqlite3.connect(str(db_dir / "target.db"))
+                copied_count = copied.execute("SELECT COUNT(*) FROM dicom_metadata").fetchone()[0]
+                self.assertEqual(copied_count, 1)
+                copied.close()
+
+    def test_move_selected_studies_deletes_from_source_and_keeps_target(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_dir = Path(td)
+            source_conn = store_metadata.init_database(str(db_dir / "source.db"), optimize=False)
+            source_conn.executemany(
+                """
+                INSERT INTO dicom_metadata (
+                    patient_name, patient_id, study_instance_uid, series_instance_uid, sop_instance_uid, modality
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    ("Doe^Jane", "PAT-1", "STUDY-1", "SERIES-1", "SOP-1", "PT"),
+                    ("Roe^John", "PAT-2", "STUDY-2", "SERIES-2", "SOP-2", "CT"),
+                ],
+            )
+            source_conn.execute(
+                """
+                INSERT INTO private_tag (
+                    sop_instance_uid, series_instance_uid, study_instance_uid,
+                    file_path, creator, group_hex, element_hex, value_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("SOP-1", "SERIES-1", "STUDY-1", "file.dcm", "CREATOR", "0019", "1001", "hash-1"),
+            )
+            source_conn.commit()
+            source_conn.close()
+
+            with patch.object(webui, "DATABANK_DIR", db_dir):
+                client = webui.app.test_client()
+                response = client.post(
+                    "/databanks/copy-studies",
+                    data={
+                        "db": "source.db",
+                        "target_name": "moved.db",
+                        "action": "move",
+                        "study_uids": ["STUDY-1"],
+                    },
+                )
+                self.assertEqual(response.status_code, 200, response.status)
+                payload = response.get_json()
+                self.assertEqual(payload["deleted_metadata_rows"], 1)
+                self.assertEqual(payload["deleted_private_tag_rows"], 1)
+
+                source = sqlite3.connect(str(db_dir / "source.db"))
+                remaining = source.execute(
+                    "SELECT study_instance_uid FROM dicom_metadata"
+                ).fetchall()
+                private_count = source.execute("SELECT COUNT(*) FROM private_tag").fetchone()[0]
+                source.close()
+                self.assertEqual(remaining, [("STUDY-2",)])
+                self.assertEqual(private_count, 0)
+
+                target = sqlite3.connect(str(db_dir / "moved.db"))
+                moved = target.execute("SELECT study_instance_uid FROM dicom_metadata").fetchall()
+                target.close()
+                self.assertEqual(moved, [("STUDY-1",)])
+
+    def test_rename_databank(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_dir = Path(td)
+            store_metadata.init_database(str(db_dir / "old.db"), optimize=False).close()
+
+            with patch.object(webui, "DATABANK_DIR", db_dir):
+                client = webui.app.test_client()
+                response = client.post(
+                    "/databanks/rename",
+                    data={"db": "old.db", "new_name": "renamed"},
+                )
+                self.assertEqual(response.status_code, 200, response.status)
+                payload = response.get_json()
+                self.assertEqual(payload["name"], "renamed.db")
+                self.assertFalse((db_dir / "old.db").exists())
+                self.assertTrue((db_dir / "renamed.db").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,3 +12,17 @@
         </button>
     </div>
 {% endcall %}
+
+{% call modal_wrapper("rename-db-modal", t.rename_databank or 'Rename Databank') %}
+    <p>{{ t.rename_databank_hint or 'Enter a new name for the current databank.' }}</p>
+    <input id="rename-db-current" type="hidden" value="{{ db_name }}">
+    <input id="rename-db-name" class="modal-input" type="text" placeholder="{{ t.databank_name or 'Databank name' }}">
+    <div class="modal-actions">
+        <button class="modal-close modal-secondary" type="button" onclick="closeRenameDb()">
+            {{ t.cancel or 'Cancel' }}
+        </button>
+        <button class="modal-close" type="button" onclick="submitRenameDb()">
+            {{ t.rename or 'Rename' }}
+        </button>
+    </div>
+{% endcall %}

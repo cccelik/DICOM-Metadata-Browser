@@ -65,6 +65,7 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             transition: transform 0.2s, box-shadow 0.2s;
             cursor: pointer;
+            position: relative;
         }
         
         .study-card:hover {
@@ -78,6 +79,87 @@
             font-size: 18px;
             overflow-wrap: anywhere;
             word-break: break-word;
+            padding-right: 34px;
+        }
+
+        .study-select-box {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            width: 22px;
+            height: 22px;
+            cursor: pointer;
+            display: none;
+        }
+
+        body.selection-mode .study-select-box {
+            display: block;
+        }
+
+        .study-card.selected {
+            outline: 2px solid #3498db;
+            box-shadow: 0 4px 14px rgba(52, 152, 219, 0.22);
+        }
+
+        .selection-panel {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 18px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .selection-panel.open {
+            display: flex;
+        }
+
+        .selection-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .selection-button {
+            border: none;
+            border-radius: 6px;
+            padding: 9px 12px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            background: #ecf0f1;
+            color: #2c3e50;
+        }
+
+        .selection-button.primary {
+            background: #1f4b99;
+            color: #fff;
+        }
+
+        .selection-button:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .selection-target {
+            min-width: 220px;
+            padding: 9px 10px;
+            border: 1px solid #d7dde4;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .selection-mode-row {
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .selection-target-select {
+            min-width: 190px;
         }
         
         .study-info {
@@ -178,6 +260,22 @@
 
         body.dark .study-card h3,
         body.dark .info-value {
+            color: #e6edf3;
+        }
+
+        body.dark .selection-button {
+            background: #1e2936;
+            color: #e6edf3;
+        }
+
+        body.dark .selection-button.primary {
+            background: #4e85e9;
+            color: #0b1320;
+        }
+
+        body.dark .selection-target {
+            background: #0f141b;
+            border-color: #2a3b52;
             color: #e6edf3;
         }
 
@@ -464,10 +562,53 @@
         {% endif %}
         
         {% if studies %}
+        <div class="selection-mode-row">
+            <button type="button" class="selection-button primary" id="selection-mode-toggle">
+                {{ t.select_studies or 'Select studies' }}
+            </button>
+        </div>
+        <div class="panel selection-panel" id="study-selection-panel">
+            <div>
+                <strong id="selected-study-count">0</strong>
+                <span>{{ t.selected_studies or 'selected studies' }}</span>
+            </div>
+            <div class="selection-actions">
+                <button type="button" class="selection-button" id="select-all-studies">{{ t.select_all_visible or 'Select all visible' }}</button>
+                <button type="button" class="selection-button" id="clear-study-selection">{{ t.clear_selection or 'Clear selection' }}</button>
+                <select class="selection-target selection-target-select" id="study-transfer-action" aria-label="{{ t.transfer_action or 'Transfer action' }}">
+                    <option value="copy">{{ t.copy_to_databank or 'Copy to databank' }}</option>
+                    <option value="move">{{ t.move_to_databank or 'Move to databank' }}</option>
+                </select>
+                <select class="selection-target selection-target-select" id="copy-target-existing" aria-label="{{ t.target_databank or 'Target databank' }}">
+                    <option value="__new__">{{ t.new_databank or 'New databank' }}</option>
+                    {% for bank in databanks %}
+                    {% if bank != db_name %}
+                    <option value="{{ bank }}">{{ bank }}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+                <input
+                    type="text"
+                    class="selection-target"
+                    id="copy-target-db"
+                    placeholder="{{ t.new_databank_name or 'New databank name' }}"
+                    aria-label="{{ t.new_databank_name or 'New databank name' }}"
+                >
+                <button type="button" class="selection-button primary" id="copy-selected-studies" disabled>
+                    {{ t.apply_transfer or 'Apply' }}
+                </button>
+            </div>
+        </div>
         <div class="studies-grid">
             {% for study in studies %}
             <a href="/study/{{ study.study_instance_uid }}?db={{ db_name }}&lang={{ lang }}">
                 <div class="study-card">
+                    <input
+                        type="checkbox"
+                        class="study-select-box"
+                        value="{{ study.study_instance_uid }}"
+                        aria-label="{{ t.select_study or 'Select study' }}"
+                    >
                     <h3>
                         {% if study.patient_name_display %}
                             {{ study.patient_name_display }}
@@ -557,6 +698,154 @@
         const anonymizeDbSelectNone = document.getElementById('anonymize-db-select-none');
         const anonymizeDbConfirm = document.getElementById('anonymize-db-confirm');
         const anonymizeDbCloseButtons = document.querySelectorAll('[data-anonymize-db-close]');
+        const studySelectBoxes = Array.from(document.querySelectorAll('.study-select-box'));
+        const selectionModeToggle = document.getElementById('selection-mode-toggle');
+        const studySelectionPanel = document.getElementById('study-selection-panel');
+        const selectedStudyCount = document.getElementById('selected-study-count');
+        const selectAllStudies = document.getElementById('select-all-studies');
+        const clearStudySelection = document.getElementById('clear-study-selection');
+        const copySelectedStudies = document.getElementById('copy-selected-studies');
+        const copyTargetDb = document.getElementById('copy-target-db');
+        const copyTargetExisting = document.getElementById('copy-target-existing');
+        const studyTransferAction = document.getElementById('study-transfer-action');
+
+        function setSelectionMode(enabled) {
+            document.body.classList.toggle('selection-mode', enabled);
+            if (studySelectionPanel) {
+                studySelectionPanel.classList.toggle('open', enabled);
+            }
+            if (selectionModeToggle) {
+                selectionModeToggle.textContent = enabled
+                    ? '{{ t.done_selecting or "Done selecting" }}'
+                    : '{{ t.select_studies or "Select studies" }}';
+            }
+            if (!enabled) {
+                studySelectBoxes.forEach(box => {
+                    box.checked = false;
+                });
+                updateStudySelection();
+            }
+        }
+
+        function updateStudySelection() {
+            const selectedCount = studySelectBoxes.filter(box => box.checked).length;
+            if (selectedStudyCount) {
+                selectedStudyCount.textContent = selectedCount.toString();
+            }
+            if (copySelectedStudies) {
+                copySelectedStudies.disabled = selectedCount === 0;
+            }
+            studySelectBoxes.forEach(box => {
+                const card = box.closest('.study-card');
+                if (card) {
+                    card.classList.toggle('selected', box.checked);
+                }
+            });
+        }
+
+        function updateTransferTargetInput() {
+            const useNewTarget = !copyTargetExisting || copyTargetExisting.value === '__new__';
+            if (copyTargetDb) {
+                copyTargetDb.style.display = useNewTarget ? '' : 'none';
+            }
+        }
+
+        if (selectionModeToggle) {
+            selectionModeToggle.addEventListener('click', () => {
+                setSelectionMode(!document.body.classList.contains('selection-mode'));
+            });
+        }
+
+        studySelectBoxes.forEach(box => {
+            box.addEventListener('click', (event) => {
+                event.stopPropagation();
+            });
+            box.addEventListener('change', updateStudySelection);
+        });
+
+        document.querySelectorAll('.studies-grid a').forEach(link => {
+            link.addEventListener('click', (event) => {
+                if (!document.body.classList.contains('selection-mode')) {
+                    return;
+                }
+                event.preventDefault();
+                const checkbox = link.querySelector('.study-select-box');
+                if (checkbox && event.target !== checkbox) {
+                    checkbox.checked = !checkbox.checked;
+                    updateStudySelection();
+                }
+            });
+        });
+
+        if (selectAllStudies) {
+            selectAllStudies.addEventListener('click', () => {
+                studySelectBoxes.forEach(box => {
+                    box.checked = true;
+                });
+                updateStudySelection();
+            });
+        }
+
+        if (clearStudySelection) {
+            clearStudySelection.addEventListener('click', () => {
+                studySelectBoxes.forEach(box => {
+                    box.checked = false;
+                });
+                updateStudySelection();
+            });
+        }
+
+        if (copyTargetExisting) {
+            copyTargetExisting.addEventListener('change', updateTransferTargetInput);
+            updateTransferTargetInput();
+        }
+
+        if (copySelectedStudies) {
+            copySelectedStudies.addEventListener('click', () => {
+                const selectedUids = studySelectBoxes
+                    .filter(box => box.checked)
+                    .map(box => box.value);
+                const targetName = copyTargetExisting && copyTargetExisting.value !== '__new__'
+                    ? copyTargetExisting.value
+                    : (copyTargetDb ? copyTargetDb.value.trim() : '');
+                const action = studyTransferAction ? studyTransferAction.value : 'copy';
+                if (!selectedUids.length) {
+                    alert('{{ t.copy_select_one or "Select at least one study to copy." }}');
+                    return;
+                }
+                if (!targetName) {
+                    alert('{{ t.copy_target_required or "Enter a new databank name." }}');
+                    return;
+                }
+
+                const originalText = copySelectedStudies.textContent;
+                const formData = new FormData();
+                formData.append('db', '{{ db_name }}');
+                formData.append('target_name', targetName);
+                formData.append('action', action);
+                selectedUids.forEach(uid => formData.append('study_uids', uid));
+                copySelectedStudies.disabled = true;
+                copySelectedStudies.textContent = '{{ t.copying_studies or "Copying..." }}';
+
+                fetch('/databanks/copy-studies', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok || !data.success) {
+                        throw new Error(data.message || '{{ t.copy_failed or "Failed to copy studies." }}');
+                    }
+                    window.location.href = `/?db=${encodeURIComponent(data.name)}&lang={{ lang }}`;
+                })
+                .catch(error => {
+                    alert(error.message || '{{ t.copy_failed or "Failed to copy studies." }}');
+                    copySelectedStudies.disabled = false;
+                    copySelectedStudies.textContent = originalText;
+                    updateStudySelection();
+                });
+            });
+        }
 
         function openAnonymizeDbModal() {
             if (!anonymizeDbModal) {

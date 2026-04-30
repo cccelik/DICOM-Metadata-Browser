@@ -7,5 +7,8 @@
     {% else %}
         <span class="subtitle">No databanks found in Databanks/</span>
     {% endif %}
-    <button type="button" class="databank-create" onclick="createDatabank();">{{ t.create_databank or 'Create Databank' }}</button>
+    <button type="button" class="databank-create" data-create-databank onclick="createDatabank();">{{ t.create_databank or 'Create Databank' }}</button>
+    {% if db_name %}
+    <button type="button" class="databank-create" onclick="renameDatabank();">{{ t.rename_databank or 'Rename Databank' }}</button>
+    {% endif %}
 </div>
