@@ -341,10 +341,13 @@
 </head>
 <body>
     {% from "partials/top_bar/top_bar.html" import render_top_bar %}
+    {% from "partials/top_bar/menu_section.html" import menu_section %}
     {% set lang_url_template = '/dashboard?db=' ~ db_name ~ '&lang=%s' %}
     {% set databank_url_template = '/dashboard?db=%s&lang=%s' %}
     {% call render_top_bar('top-dashboard-hamburger', 'top-dashboard-menu', (t.dashboard_title or 'Analytics Dashboard'), lang_url_template, databank_url_template, t, lang, db_name, databanks) %}
-        <a href="/?db={{ db_name }}&lang={{ lang }}">{{ t.back_to_studies or 'Back to Studies' }}</a>
+        {% call menu_section('top-dashboard-navigation', t.navigation or 'Navigation', true) %}
+            <a href="/?db={{ db_name }}&lang={{ lang }}">{{ t.back_to_studies or 'Back to Studies' }}</a>
+        {% endcall %}
     {% endcall %}
     <div class="container">
         <!-- Protocol Adherence Overview -->

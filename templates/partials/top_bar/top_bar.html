@@ -1,4 +1,5 @@
 {% macro render_top_bar(menu_button_id, menu_id, title_sub, lang_url_template, databank_url_template, t, lang, db_name, databanks) %}
+{% from "partials/top_bar/menu_section.html" import menu_section %}
 <div class="top-bar">
     <div class="top-bar-left">
         <div class="hamburger-wrapper">
@@ -10,13 +11,17 @@
             <div id="{{ menu_id }}" class="hamburger-menu">
                 <div class="hamburger-menu-inner">
                     {{ caller() }}
+                </div>
+                {% call menu_section(menu_id ~ '-preferences', t.preferences or 'Preferences') %}
                     {% include "partials/top_bar/theme_toggle_button.html" %}
-                </div>
-                <div class="hamburger-lang">
-                    <a href="{{ lang_url_template|format('en') }}" class="lang-toggle {% if lang == 'en' %}active{% endif %}">EN</a>
-                    <a href="{{ lang_url_template|format('de') }}" class="lang-toggle {% if lang == 'de' %}active{% endif %}">DE</a>
-                </div>
-                {% include "partials/top_bar/databanks.html" %}
+                    <div class="hamburger-lang">
+                        <a href="{{ lang_url_template|format('en') }}" class="lang-toggle {% if lang == 'en' %}active{% endif %}">EN</a>
+                        <a href="{{ lang_url_template|format('de') }}" class="lang-toggle {% if lang == 'de' %}active{% endif %}">DE</a>
+                    </div>
+                {% endcall %}
+                {% call menu_section(menu_id ~ '-databanks', t.databanks or 'Databanks') %}
+                    {% include "partials/top_bar/databanks.html" %}
+                {% endcall %}
             </div>
         </div>
         <div class="top-bar-copy">

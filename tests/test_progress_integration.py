@@ -22,6 +22,8 @@ class ProgressIntegrationTests(unittest.TestCase):
     def setUp(self):
         with webui.EXTRACT_JOBS_LOCK:
             webui.EXTRACT_JOBS.clear()
+        with webui.PROCESS_JOBS_LOCK:
+            webui.PROCESS_JOBS.clear()
 
     def test_process_directory_reports_progress_when_not_verbose(self):
         events = []
@@ -169,6 +171,88 @@ class ProgressIntegrationTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(response.status_code, 400)
         self.assertFalse(payload["success"])
+
+    def test_web_process_job_start_runs_job_and_exposes_progress(self):
+        captured = {}
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            input_root = base / "dicoms"
+            input_root.mkdir()
+
+            def fake_process_directory(dicom_dir, **kwargs):
+                captured["dicom_dir"] = dicom_dir
+                captured["kwargs"] = kwargs
+                kwargs["progress_callback"](
+                    {
+                        "phase": "Processing",
+                        "current": 1,
+                        "total": 2,
+                        "percent": 50.0,
+                        "elapsed": "00:01",
+                        "eta": "00:01",
+                        "memory_mb": 20.5,
+                        "message": "Processing",
+                        "done": False,
+                        "error": None,
+                    }
+                )
+
+            with patch("webui.threading.Thread", ImmediateThread):
+                with patch("webui.process_directory", side_effect=fake_process_directory):
+                    response = webui.app.test_client().post(
+                        "/process-dicom/start",
+                        data={
+                            "input_root": str(input_root),
+                            "db": "processed.db",
+                            "process_subdirs": "on",
+                            "skip_existing_paths": "on",
+                            "max_workers": "2",
+                        },
+                    )
+
+            payload = response.get_json()
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(payload["success"])
+            self.assertEqual(captured["dicom_dir"], str(input_root.resolve()))
+            self.assertEqual(captured["kwargs"]["db_path"], webui.resolve_db_path("processed.db"))
+            self.assertTrue(captured["kwargs"]["process_subdirs"])
+            self.assertTrue(captured["kwargs"]["skip_existing_paths"])
+            self.assertEqual(captured["kwargs"]["max_workers"], 2)
+            self.assertFalse(captured["kwargs"]["auto_workers"])
+
+            jobs_response = webui.app.test_client().get("/process-dicom/jobs")
+            jobs_payload = jobs_response.get_json()
+            self.assertTrue(jobs_payload["success"])
+            self.assertEqual(len(jobs_payload["jobs"]), 1)
+            job = jobs_payload["jobs"][0]
+            self.assertEqual(job["status"], "done")
+            self.assertEqual(job["db_name"], "processed.db")
+            self.assertEqual(job["progress"]["percent"], 100.0)
+            self.assertEqual(job["progress"]["memory_mb"], 20.5)
+
+    def test_web_process_job_start_validates_paths_and_workers(self):
+        client = webui.app.test_client()
+        missing_response = client.post(
+            "/process-dicom/start",
+            data={"input_root": "/does/not/exist", "db": "x.db"},
+        )
+        self.assertEqual(missing_response.status_code, 400)
+        self.assertFalse(missing_response.get_json()["success"])
+
+        with tempfile.TemporaryDirectory() as td:
+            input_root = Path(td) / "dicoms"
+            input_root.mkdir()
+            workers_response = client.post(
+                "/process-dicom/start",
+                data={
+                    "input_root": str(input_root),
+                    "db": "x.db",
+                    "max_workers": "0",
+                },
+            )
+
+        self.assertEqual(workers_response.status_code, 400)
+        self.assertFalse(workers_response.get_json()["success"])
 
     def test_filesystem_directories_lists_subdirectories(self):
         with tempfile.TemporaryDirectory() as td:

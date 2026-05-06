@@ -19,6 +19,21 @@
         });
     }
 
+    if (topMenu) {
+        topMenu.querySelectorAll('[data-menu-section-toggle]').forEach((toggle) => {
+            toggle.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const expanded = toggle.getAttribute('aria-expanded') === 'true';
+                const targetId = toggle.getAttribute('aria-controls');
+                const target = targetId ? document.getElementById(targetId) : null;
+                toggle.setAttribute('aria-expanded', String(!expanded));
+                if (target) {
+                    target.classList.toggle('open', !expanded);
+                }
+            });
+        });
+    }
+
     function closeTopMenu() {
         if (topMenuButton && topMenu) {
             topMenuButton.setAttribute('aria-expanded', 'false');

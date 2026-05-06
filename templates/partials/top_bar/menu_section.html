@@ -1,0 +1,17 @@
+{% macro menu_section(section_id, title, open=false) %}
+<div class="hamburger-section" data-menu-section>
+    <button
+        type="button"
+        class="hamburger-section-toggle"
+        data-menu-section-toggle
+        aria-expanded="{{ 'true' if open else 'false' }}"
+        aria-controls="{{ section_id }}"
+    >
+        <span>{{ title }}</span>
+        <i class="ph ph-caret-down" aria-hidden="true"></i>
+    </button>
+    <div id="{{ section_id }}" class="hamburger-section-content {% if open %}open{% endif %}">
+        {{ caller() }}
+    </div>
+</div>
+{% endmacro %}

@@ -122,7 +122,8 @@
         border-radius: 8px;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
         overflow: hidden;
-        min-width: 180px;
+        min-width: 240px;
+        max-width: min(360px, calc(100vw - 32px));
         transform-origin: top left;
         transform: scale(0.95);
         opacity: 0;
@@ -153,13 +154,13 @@
     }
 
     .hamburger-menu-inner {
-        padding-bottom: 8px;
+        padding-bottom: 0;
     }
 
     .hamburger-lang {
         display: flex;
         gap: 6px;
-        padding: 8px 16px;
+        padding: 10px 14px 14px;
         justify-content: space-between;
     }
 
@@ -175,14 +176,48 @@
         line-height: 1;
     }
 
-    .hamburger-section-title {
-        padding: 10px 16px;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #7f8c8d;
-        background: #f5f7fa;
+    .hamburger-section {
         border-bottom: 1px solid #f0f0f0;
+    }
+
+    .hamburger-section-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        width: 100%;
+        padding: 12px 16px;
+        border: none;
+        background: #f5f7fa;
+        color: #2c3e50;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+
+    .hamburger-section-toggle i {
+        font-size: 14px;
+        transition: transform 0.2s ease;
+    }
+
+    .hamburger-section-toggle[aria-expanded="true"] i {
+        transform: rotate(180deg);
+    }
+
+    .hamburger-section-content {
+        display: none;
+        background: #fff;
+    }
+
+    .hamburger-section-content.open {
+        display: block;
+    }
+
+    .hamburger-section-content > a,
+    .hamburger-section-content > button {
+        padding-left: 24px;
     }
 
     .hamburger-databanks {
@@ -310,9 +345,16 @@
         background: #1b2a40;
     }
 
-    body.dark .hamburger-section-title {
+    body.dark .hamburger-section {
+        border-bottom-color: #243244;
+    }
+
+    body.dark .hamburger-section-toggle {
         color: #9aa7b5;
         background: #121a24;
-        border-bottom-color: #243244;
+    }
+
+    body.dark .hamburger-section-content {
+        background: #18212d;
     }
 </style>

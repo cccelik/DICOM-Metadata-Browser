@@ -413,10 +413,13 @@
 </head>
 <body>
     {% from "partials/top_bar/top_bar.html" import render_top_bar %}
+    {% from "partials/top_bar/menu_section.html" import menu_section %}
     {% set lang_url_template = '/?db=' ~ db_name ~ '&lang=%s' %}
     {% set databank_url_template = '/?db=%s&lang=%s' %}
     {% call render_top_bar('top-study-hamburger', 'top-study-menu', '&nbsp;', lang_url_template, databank_url_template, t, lang, db_name, databanks) %}
-        <a href="/dashboard?db={{ db_name }}">{{ t.dashboard }}</a>
+        {% call menu_section('top-study-navigation', t.navigation or 'Navigation', true) %}
+            <a href="/dashboard?db={{ db_name }}">{{ t.dashboard }}</a>
+        {% endcall %}
     {% endcall %}
     <div class="container">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">

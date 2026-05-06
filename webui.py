@@ -83,6 +83,8 @@ ONE_PER_SERIES_OUTPUT_DISPLAY = ONE_PER_SERIES_OUTPUT_DIR.name
 
 EXTRACT_JOBS: Dict[str, dict] = {}
 EXTRACT_JOBS_LOCK = threading.Lock()
+PROCESS_JOBS: Dict[str, dict] = {}
+PROCESS_JOBS_LOCK = threading.Lock()
 
 EXPORT_SECTIONS = [
     {
@@ -578,6 +580,13 @@ def _set_extract_job(job_id: str, updates: dict) -> None:
         job["updated_at"] = time.time()
 
 
+def _set_process_job(job_id: str, updates: dict) -> None:
+    with PROCESS_JOBS_LOCK:
+        job = PROCESS_JOBS.setdefault(job_id, {})
+        job.update(updates)
+        job["updated_at"] = time.time()
+
+
 def _run_extract_job(job_id: str, input_root: str, output_root: str) -> None:
     def progress_callback(payload: dict) -> None:
         _set_extract_job(job_id, {"progress": payload, "status": "running"})
@@ -613,6 +622,72 @@ def _run_extract_job(job_id: str, input_root: str, output_root: str) -> None:
         )
     except Exception as exc:
         _set_extract_job(
+            job_id,
+            {
+                "status": "error",
+                "error": str(exc),
+                "progress": {
+                    "phase": "Error",
+                    "current": 0,
+                    "total": 0,
+                    "percent": 0.0,
+                    "elapsed": "--:--",
+                    "eta": "--:--",
+                    "memory_mb": 0,
+                    "message": str(exc),
+                    "done": True,
+                    "error": str(exc),
+                },
+            },
+        )
+
+
+def _run_process_job(
+    job_id: str,
+    input_root: str,
+    db_path: str,
+    db_name: str,
+    process_subdirs: bool,
+    skip_existing_paths: bool,
+    max_workers: Optional[int],
+) -> None:
+    def progress_callback(payload: dict) -> None:
+        _set_process_job(job_id, {"progress": payload, "status": "running"})
+
+    try:
+        process_directory(
+            input_root,
+            db_path=db_path,
+            process_subdirs=process_subdirs,
+            max_workers=max_workers,
+            verbose=False,
+            skip_existing_paths=skip_existing_paths,
+            auto_workers=max_workers is None,
+            progress_callback=progress_callback,
+        )
+        with PROCESS_JOBS_LOCK:
+            final_progress = dict(PROCESS_JOBS.get(job_id, {}).get("progress", {}))
+        final_progress.update(
+            {
+                "phase": "Complete",
+                "percent": 100.0,
+                "eta_s": 0,
+                "eta": "00:00",
+                "message": f"Processed into {db_name}",
+                "done": True,
+                "error": None,
+            }
+        )
+        _set_process_job(
+            job_id,
+            {
+                "status": "done",
+                "result": {"db_name": db_name, "db_path": db_path, "input_root": input_root},
+                "progress": final_progress,
+            },
+        )
+    except Exception as exc:
+        _set_process_job(
             job_id,
             {
                 "status": "error",
@@ -680,11 +755,88 @@ def start_extract_one_per_series():
     return jsonify({"success": True, "job_id": job_id})
 
 
+@app.route('/process-dicom/start', methods=['POST'])
+def start_process_dicom():
+    input_root = (request.form.get("input_root") or "").strip()
+    if not input_root:
+        return jsonify({"success": False, "message": "Input path is required."}), 400
+
+    input_path = Path(input_root).expanduser().resolve()
+    if not input_path.exists():
+        return jsonify({"success": False, "message": "Input path does not exist."}), 400
+
+    new_db_name = (request.form.get("new_db_name") or "").strip()
+    db_name = normalize_db_name(new_db_name or request.form.get("db") or DEFAULT_DB_NAME)
+    db_path = resolve_db_path(db_name)
+    process_subdirs = request.form.get("process_subdirs") == "on"
+    skip_existing_paths = request.form.get("skip_existing_paths") == "on"
+    max_workers_raw = (request.form.get("max_workers") or "").strip()
+    max_workers = None
+    if max_workers_raw:
+        try:
+            max_workers = int(max_workers_raw)
+        except ValueError:
+            return jsonify({"success": False, "message": "Max workers must be a number."}), 400
+        if max_workers < 1:
+            return jsonify({"success": False, "message": "Max workers must be greater than zero."}), 400
+
+    job_id = uuid.uuid4().hex
+    with PROCESS_JOBS_LOCK:
+        PROCESS_JOBS[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "input_root": str(input_path),
+            "db_name": db_name,
+            "db_path": db_path,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "progress": {
+                "phase": "Queued",
+                "current": 0,
+                "total": 0,
+                "percent": 0.0,
+                "elapsed": "00:00",
+                "eta": "--:--",
+                "memory_mb": 0,
+                "message": "Queued",
+                "done": False,
+                "error": None,
+            },
+        }
+
+    thread = threading.Thread(
+        target=_run_process_job,
+        args=(
+            job_id,
+            str(input_path),
+            db_path,
+            db_name,
+            process_subdirs,
+            skip_existing_paths,
+            max_workers,
+        ),
+        daemon=True,
+    )
+    thread.start()
+    return jsonify({"success": True, "job_id": job_id})
+
+
 @app.route('/extract-one-per-series/jobs')
 def extract_one_per_series_jobs():
     with EXTRACT_JOBS_LOCK:
         jobs = sorted(
             (dict(job) for job in EXTRACT_JOBS.values()),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        )
+    return jsonify({"success": True, "jobs": jobs})
+
+
+@app.route('/process-dicom/jobs')
+def process_dicom_jobs():
+    with PROCESS_JOBS_LOCK:
+        jobs = sorted(
+            (dict(job) for job in PROCESS_JOBS.values()),
             key=lambda item: item.get("created_at", 0),
             reverse=True,
         )
