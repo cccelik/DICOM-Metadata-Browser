@@ -729,11 +729,31 @@ def process_directory(
         return
 
     _vprint("\n   🧹 Marking representative series...")
+    if progress_tracker:
+        current = progress_tracker.current
+        progress_tracker.update(
+            current,
+            total=current + 1,
+            phase="Finalizing",
+            message="Marking representative series",
+        )
     try:
         pruned = prune_non_representative_series(conn)
         conn.commit()
+        if progress_tracker:
+            progress_tracker.update(
+                progress_tracker.total,
+                phase="Finalizing",
+                message=f"Marked {pruned} non-representative series",
+            )
         _vprint(f"   ✓ Marked {pruned} non-representative series")
     except sqlite3.Error as e:
+        if progress_tracker:
+            progress_tracker.update(
+                progress_tracker.total,
+                phase="Finalizing",
+                message=f"Representative-series step skipped: {e}",
+            )
         _vprint(f"   ⚠ Warning: Could not mark representative series: {e}")
 
     conn.close()
