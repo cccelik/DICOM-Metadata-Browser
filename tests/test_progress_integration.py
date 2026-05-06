@@ -53,7 +53,10 @@ class ProgressIntegrationTests(unittest.TestCase):
                     )
 
             self.assertTrue(events)
-            self.assertEqual(events[0]["total"], 4)
+            self.assertEqual(events[0]["total"], 5)
+            processing_events = [event for event in events if event["phase"] == "Processing"]
+            self.assertTrue(processing_events)
+            self.assertLess(processing_events[-1]["percent"], 100.0)
             self.assertIn("Finalizing", [event["phase"] for event in events])
             self.assertEqual(events[-1]["percent"], 100.0)
             self.assertTrue(events[-1]["done"])

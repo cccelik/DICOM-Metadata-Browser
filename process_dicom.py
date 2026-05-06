@@ -439,6 +439,7 @@ def process_directory(
         existing_paths = {row[0] for row in rows}
 
     progress_tracker: Optional[ProgressTracker] = None
+    progress_file_units = 0
     if progress_callback:
         if dicom_path.is_file():
             candidate_files = [dicom_path] if is_dicom_candidate(dicom_path) else []
@@ -451,8 +452,9 @@ def process_directory(
             progress_base,
             existing_paths,
         )
+        progress_file_units = len(candidate_files) * 2
         progress_tracker = ProgressTracker(
-            total=len(candidate_files) * 2,
+            total=progress_file_units + 1,
             phase="Processing",
             callback=progress_callback,
         )
@@ -730,10 +732,8 @@ def process_directory(
 
     _vprint("\n   🧹 Marking representative series...")
     if progress_tracker:
-        current = progress_tracker.current
         progress_tracker.update(
-            current,
-            total=current + 1,
+            progress_file_units,
             phase="Finalizing",
             message="Marking representative series",
         )
