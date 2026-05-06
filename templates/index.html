@@ -395,10 +395,190 @@
             margin: 0;
         }
 
+        .extract-form {
+            display: grid;
+            gap: 14px;
+        }
+
+        .extract-field {
+            display: grid;
+            gap: 6px;
+        }
+
+        .extract-field label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #5c6b84;
+            text-transform: uppercase;
+        }
+
+        .extract-field input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #d7dde4;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .extract-path-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .extract-path-row input {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .folder-picker-toolbar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .folder-picker-path {
+            flex: 1;
+            min-width: 0;
+            padding: 8px 10px;
+            border: 1px solid #d7dde4;
+            border-radius: 6px;
+            color: #2c3e50;
+            background: #f8f9fb;
+            font-size: 12px;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .folder-picker-list {
+            max-height: 340px;
+            overflow: auto;
+            border: 1px solid #e6ebf2;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        .folder-picker-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 10px 12px;
+            border: 0;
+            border-bottom: 1px solid #edf1f5;
+            background: transparent;
+            color: #2c3e50;
+            cursor: pointer;
+            text-align: left;
+            font-size: 14px;
+        }
+
+        .folder-picker-item:hover {
+            background: #eef4ff;
+            color: #1f4b99;
+        }
+
+        .folder-picker-empty {
+            padding: 16px;
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+
+        .extract-jobs {
+            display: grid;
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .extract-job {
+            border: 1px solid #d7dde4;
+            border-radius: 8px;
+            padding: 12px;
+            background: #f8f9fb;
+        }
+
+        .extract-job-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 13px;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+
+        .extract-job-path {
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .extract-progress-track {
+            height: 12px;
+            background: #e5e9ef;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .extract-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: #3498db;
+            transition: width 0.25s ease;
+        }
+
+        .extract-job.error .extract-progress-fill {
+            background: #e74c3c;
+        }
+
+        .extract-job.done .extract-progress-fill {
+            background: #27ae60;
+        }
+
+        .extract-job-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 8px;
+            color: #7f8c8d;
+            font-size: 12px;
+        }
+
         body.dark .modality-option {
             background: #0f141b;
             border-color: #2a3b52;
             color: #e6edf3;
+        }
+
+        body.dark .extract-field label,
+        body.dark .extract-job-meta {
+            color: #9aa7b5;
+        }
+
+        body.dark .extract-field input,
+        body.dark .extract-job,
+        body.dark .folder-picker-path,
+        body.dark .folder-picker-list {
+            background: #121a24;
+            border-color: #2a3b52;
+            color: #e6edf3;
+        }
+
+        body.dark .folder-picker-item {
+            color: #e6edf3;
+            border-bottom-color: #243244;
+        }
+
+        body.dark .folder-picker-item:hover {
+            background: #18263a;
+            color: #cfe0ff;
+        }
+
+        body.dark .extract-job-header {
+            color: #e6edf3;
+        }
+
+        body.dark .extract-progress-track {
+            background: #243244;
         }
 
     </style>
@@ -414,6 +594,7 @@
         <a href="/dashboard?db={{ db_name }}">{{ t.dashboard }}</a>
         <button type="button" id="export-db-csv-button" class="menu-upload">{{ t.export_db_csv or 'Export Database CSV' }}</button>
         <button type="button" onclick="openAnonymizeDbModal(); closeTopMenu();" class="menu-upload">{{ t.export_db or 'Export Database' }}</button>
+        <button type="button" onclick="openExtractModal(); closeTopMenu();" class="menu-upload">{{ t.extract_one_per_series or 'Extract One Per Series' }}</button>
         <button type="button" onclick="toggleUploadZone(); closeTopMenu();" class="menu-upload">{{ t.upload }}</button>
     {% endcall %}
     <div class="container">
@@ -682,6 +863,58 @@
     {% include "partials/modals/anonymized_export/modal.html" %}
     {% include "partials/modals/export/modal.html" %}
 
+    <div id="extract-modal" class="export-modal" aria-hidden="true">
+        <div class="export-modal-content" role="dialog" aria-modal="true" aria-labelledby="extract-modal-title">
+            <div class="export-modal-header">
+                <h3 id="extract-modal-title">{{ t.extract_one_per_series or 'Extract One Per Series' }}</h3>
+                <button type="button" class="export-modal-close" id="extract-modal-close" aria-label="{{ t.close }}">×</button>
+            </div>
+            <div class="export-modal-body">
+                <form id="extract-form" class="extract-form">
+                    <div class="extract-field">
+                        <label for="extract-input-root">{{ t.input_root or 'Input root' }}</label>
+                        <div class="extract-path-row">
+                            <input id="extract-input-root" name="input_root" type="text" placeholder="/path/to/input_root" autocomplete="off">
+                            <button type="button" class="selection-button" data-folder-target="extract-input-root">{{ t.browse or 'Browse' }}</button>
+                        </div>
+                    </div>
+                    <div class="extract-field">
+                        <label for="extract-output-root">{{ t.output_root or 'Output root' }}</label>
+                        <div class="extract-path-row">
+                            <input id="extract-output-root" name="output_root" type="text" value="{{ one_per_series_output_dir }}" placeholder="/path/to/output_root" autocomplete="off">
+                            <button type="button" class="selection-button" data-folder-target="extract-output-root">{{ t.browse or 'Browse' }}</button>
+                        </div>
+                    </div>
+                    <div class="export-modal-actions">
+                        <button type="submit" class="selection-button primary" id="extract-submit">{{ t.start_extraction or 'Start Extraction' }}</button>
+                    </div>
+                </form>
+                <div id="extract-jobs" class="extract-jobs"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="folder-picker-modal" class="export-modal" aria-hidden="true">
+        <div class="export-modal-content" role="dialog" aria-modal="true" aria-labelledby="folder-picker-title">
+            <div class="export-modal-header">
+                <h3 id="folder-picker-title">{{ t.choose_folder or 'Choose Folder' }}</h3>
+                <button type="button" class="export-modal-close" id="folder-picker-close" aria-label="{{ t.close }}">×</button>
+            </div>
+            <div class="export-modal-body">
+                <div class="folder-picker-toolbar">
+                    <button type="button" class="selection-button" id="folder-picker-up">{{ t.up or 'Up' }}</button>
+                    <button type="button" class="selection-button" id="folder-picker-home">{{ t.home or 'Home' }}</button>
+                    <div class="folder-picker-path" id="folder-picker-path"></div>
+                </div>
+                <div class="folder-picker-list" id="folder-picker-list"></div>
+            </div>
+            <div class="export-modal-footer">
+                <button type="button" class="selection-button" id="folder-picker-cancel">{{ t.cancel or 'Cancel' }}</button>
+                <button type="button" class="selection-button primary" id="folder-picker-select">{{ t.select_folder or 'Select Folder' }}</button>
+            </div>
+        </div>
+    </div>
+
     {% include "partials/create_databank_modal.html" %}
 
     <script>
@@ -708,6 +941,263 @@
         const copyTargetDb = document.getElementById('copy-target-db');
         const copyTargetExisting = document.getElementById('copy-target-existing');
         const studyTransferAction = document.getElementById('study-transfer-action');
+        const extractModal = document.getElementById('extract-modal');
+        const extractModalClose = document.getElementById('extract-modal-close');
+        const extractForm = document.getElementById('extract-form');
+        const extractSubmit = document.getElementById('extract-submit');
+        const extractJobs = document.getElementById('extract-jobs');
+        const folderPickerModal = document.getElementById('folder-picker-modal');
+        const folderPickerClose = document.getElementById('folder-picker-close');
+        const folderPickerCancel = document.getElementById('folder-picker-cancel');
+        const folderPickerSelect = document.getElementById('folder-picker-select');
+        const folderPickerUp = document.getElementById('folder-picker-up');
+        const folderPickerHome = document.getElementById('folder-picker-home');
+        const folderPickerPath = document.getElementById('folder-picker-path');
+        const folderPickerList = document.getElementById('folder-picker-list');
+        let folderPickerTarget = null;
+        let folderPickerCurrentPath = '';
+        let folderPickerParentPath = null;
+        let folderPickerHomePath = null;
+        let extractPollTimer = null;
+
+        function escapeHtml(value) {
+            return String(value || '').replace(/[&<>"']/g, (char) => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[char]));
+        }
+
+        function openExtractModal() {
+            if (!extractModal) {
+                return;
+            }
+            extractModal.classList.add('open');
+            extractModal.setAttribute('aria-hidden', 'false');
+            pollExtractJobs();
+            if (!extractPollTimer) {
+                extractPollTimer = window.setInterval(pollExtractJobs, 1000);
+            }
+        }
+
+        function closeExtractModal() {
+            if (!extractModal) {
+                return;
+            }
+            extractModal.classList.remove('open');
+            extractModal.setAttribute('aria-hidden', 'true');
+        }
+
+        function openFolderPicker(targetInputId) {
+            folderPickerTarget = document.getElementById(targetInputId);
+            if (!folderPickerModal || !folderPickerTarget) {
+                return;
+            }
+            folderPickerModal.classList.add('open');
+            folderPickerModal.setAttribute('aria-hidden', 'false');
+            loadFolderPicker(folderPickerTarget.value.trim());
+        }
+
+        function closeFolderPicker() {
+            if (!folderPickerModal) {
+                return;
+            }
+            folderPickerModal.classList.remove('open');
+            folderPickerModal.setAttribute('aria-hidden', 'true');
+        }
+
+        function loadFolderPicker(path) {
+            const params = new URLSearchParams();
+            if (path) {
+                params.set('path', path);
+            }
+            if (folderPickerList) {
+                folderPickerList.innerHTML = '<div class="folder-picker-empty">{{ t.loading or "Loading..." }}</div>';
+            }
+            fetch(`/filesystem/directories?${params.toString()}`)
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok || !data.success) {
+                        throw new Error(data.message || 'Could not open folder.');
+                    }
+                    folderPickerCurrentPath = data.path || '';
+                    folderPickerParentPath = data.parent || null;
+                    folderPickerHomePath = data.home || null;
+                    if (folderPickerPath) {
+                        folderPickerPath.textContent = folderPickerCurrentPath;
+                    }
+                    if (folderPickerUp) {
+                        folderPickerUp.disabled = !folderPickerParentPath;
+                    }
+                    renderFolderPickerList(data.directories || []);
+                })
+                .catch(error => {
+                    if (folderPickerList) {
+                        folderPickerList.innerHTML = `<div class="folder-picker-empty">${escapeHtml(error.message || 'Could not open folder.')}</div>`;
+                    }
+                });
+        }
+
+        function renderFolderPickerList(directories) {
+            if (!folderPickerList) {
+                return;
+            }
+            if (!directories.length) {
+                folderPickerList.innerHTML = '<div class="folder-picker-empty">{{ t.no_subfolders or "No subfolders" }}</div>';
+                return;
+            }
+            folderPickerList.innerHTML = directories.map((directory) => `
+                <button type="button" class="folder-picker-item" data-folder-path="${escapeHtml(directory.path)}">
+                    <i class="ph ph-folder" aria-hidden="true"></i>
+                    <span>${escapeHtml(directory.name)}</span>
+                </button>
+            `).join('');
+            folderPickerList.querySelectorAll('[data-folder-path]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    loadFolderPicker(button.dataset.folderPath || '');
+                });
+            });
+        }
+
+        document.querySelectorAll('[data-folder-target]').forEach((button) => {
+            button.addEventListener('click', () => {
+                openFolderPicker(button.dataset.folderTarget);
+            });
+        });
+
+        if (folderPickerClose) {
+            folderPickerClose.addEventListener('click', closeFolderPicker);
+        }
+
+        if (folderPickerCancel) {
+            folderPickerCancel.addEventListener('click', closeFolderPicker);
+        }
+
+        if (folderPickerModal) {
+            folderPickerModal.addEventListener('click', (event) => {
+                if (event.target === folderPickerModal) {
+                    closeFolderPicker();
+                }
+            });
+        }
+
+        if (folderPickerUp) {
+            folderPickerUp.addEventListener('click', () => {
+                if (folderPickerParentPath) {
+                    loadFolderPicker(folderPickerParentPath);
+                }
+            });
+        }
+
+        if (folderPickerHome) {
+            folderPickerHome.addEventListener('click', () => {
+                loadFolderPicker(folderPickerHomePath || '');
+            });
+        }
+
+        if (folderPickerSelect) {
+            folderPickerSelect.addEventListener('click', () => {
+                if (folderPickerTarget && folderPickerCurrentPath) {
+                    folderPickerTarget.value = folderPickerCurrentPath;
+                }
+                closeFolderPicker();
+            });
+        }
+
+        function renderExtractJobs(jobs) {
+            if (!extractJobs) {
+                return;
+            }
+            if (!jobs.length) {
+                extractJobs.innerHTML = '';
+                return;
+            }
+            extractJobs.innerHTML = jobs.map((job) => {
+                const progress = job.progress || {};
+                const percent = Number(progress.percent || 0);
+                const statusClass = job.status === 'error' ? 'error' : (job.status === 'done' ? 'done' : '');
+                const memory = Number(progress.memory_mb || 0).toFixed(1);
+                const message = escapeHtml(progress.message || job.status || '');
+                const outputRoot = escapeHtml(job.output_root || '');
+                const phase = escapeHtml(progress.phase || job.status || '');
+                return `
+                    <div class="extract-job ${statusClass}">
+                        <div class="extract-job-header">
+                            <strong>${phase}</strong>
+                            <span>${percent.toFixed(1)}%</span>
+                        </div>
+                        <div class="extract-job-path">${outputRoot}</div>
+                        <div class="extract-progress-track" aria-label="Extraction progress">
+                            <div class="extract-progress-fill" style="width: ${Math.max(0, Math.min(100, percent))}%"></div>
+                        </div>
+                        <div class="extract-job-meta">
+                            <span>${progress.current || 0}/${progress.total || 0}</span>
+                            <span>ETA ${progress.eta || '--:--'}</span>
+                            <span>Elapsed ${progress.elapsed || '00:00'}</span>
+                            <span>Memory ${memory} MB</span>
+                            <span>${message}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function pollExtractJobs() {
+            fetch('/extract-one-per-series/jobs')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        renderExtractJobs(data.jobs || []);
+                    }
+                })
+                .catch(() => {});
+        }
+
+        if (extractModalClose) {
+            extractModalClose.addEventListener('click', closeExtractModal);
+        }
+
+        if (extractModal) {
+            extractModal.addEventListener('click', (event) => {
+                if (event.target === extractModal) {
+                    closeExtractModal();
+                }
+            });
+        }
+
+        if (extractForm) {
+            extractForm.addEventListener('submit', (event) => {
+                event.preventDefault();
+                const formData = new FormData(extractForm);
+                if (extractSubmit) {
+                    extractSubmit.disabled = true;
+                    extractSubmit.textContent = '{{ t.starting or "Starting..." }}';
+                }
+                fetch('/extract-one-per-series/start', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok || !data.success) {
+                        throw new Error(data.message || 'Failed to start extraction.');
+                    }
+                    extractForm.reset();
+                    pollExtractJobs();
+                })
+                .catch(error => {
+                    alert(error.message || 'Failed to start extraction.');
+                })
+                .finally(() => {
+                    if (extractSubmit) {
+                        extractSubmit.disabled = false;
+                        extractSubmit.textContent = '{{ t.start_extraction or "Start Extraction" }}';
+                    }
+                });
+            });
+        }
 
         function setSelectionMode(enabled) {
             document.body.classList.toggle('selection-mode', enabled);

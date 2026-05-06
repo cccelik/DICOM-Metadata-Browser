@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pydicom  # type: ignore[import]
 from pydicom.errors import InvalidDicomError
@@ -630,6 +630,7 @@ def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
 def extract_metadata_from_paths(
     dcm_paths: List[Path],
     max_workers: Optional[int] = None,
+    progress_callback: Optional[Callable[[Path, Optional[DICOMMetadata]], None]] = None,
 ) -> List[Tuple[Path, DICOMMetadata]]:
     """Extract metadata for a list of DICOM files using a process pool."""
     filtered_paths = [
@@ -654,6 +655,8 @@ def extract_metadata_from_paths(
             meta = future.result()
             if meta:
                 metadata_list.append((dcm_path, meta))
+            if progress_callback:
+                progress_callback(dcm_path, meta)
 
     return metadata_list
 

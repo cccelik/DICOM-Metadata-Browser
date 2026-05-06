@@ -14,6 +14,9 @@ import sqlite3
 import statistics
 import string
 import tempfile
+import threading
+import time
+import uuid
 import zipfile
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -66,14 +69,20 @@ from dicom_browser.qa_utils import (
 from dicom_browser.store_metadata import init_database
 from dicom_browser.study_service import build_study_detail_payload as build_study_detail_payload_service
 from dicom_browser.translations import get_translation
+from extract_one_per_series import extract_one_per_series
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # Required for sessions
 
 BASE_DIR = Path(__file__).resolve().parent
 DATABANK_DIR = BASE_DIR / "Databanks"
+ONE_PER_SERIES_OUTPUT_DIR = BASE_DIR / "OnePerSeriesSamples"
 DEFAULT_DB_NAME = "dicom_metadata.db"
 DEFAULT_DB = str(DATABANK_DIR / DEFAULT_DB_NAME)
+ONE_PER_SERIES_OUTPUT_DISPLAY = ONE_PER_SERIES_OUTPUT_DIR.name
+
+EXTRACT_JOBS: Dict[str, dict] = {}
+EXTRACT_JOBS_LOCK = threading.Lock()
 
 EXPORT_SECTIONS = [
     {
@@ -308,6 +317,17 @@ ANONYMIZE_BLANK_FIELDS = {
 
 def ensure_databank_dir() -> None:
     DATABANK_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def ensure_one_per_series_output_dir() -> None:
+    ONE_PER_SERIES_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def resolve_extract_output_path(output_root: str) -> Path:
+    output_path = Path(output_root or ONE_PER_SERIES_OUTPUT_DISPLAY).expanduser()
+    if not output_path.is_absolute():
+        output_path = BASE_DIR / output_path
+    return output_path.resolve()
 
 
 def normalize_db_name(db_value: Optional[str]) -> str:
@@ -549,6 +569,165 @@ def _scrub_all_private_tag_payloads(conn: sqlite3.Connection) -> int:
         """
     )
     return int(scrub_cursor.rowcount or 0)
+
+
+def _set_extract_job(job_id: str, updates: dict) -> None:
+    with EXTRACT_JOBS_LOCK:
+        job = EXTRACT_JOBS.setdefault(job_id, {})
+        job.update(updates)
+        job["updated_at"] = time.time()
+
+
+def _run_extract_job(job_id: str, input_root: str, output_root: str) -> None:
+    def progress_callback(payload: dict) -> None:
+        _set_extract_job(job_id, {"progress": payload, "status": "running"})
+
+    try:
+        result = extract_one_per_series(
+            Path(input_root),
+            Path(output_root),
+            progress_callback=progress_callback,
+        )
+        with EXTRACT_JOBS_LOCK:
+            final_progress = dict(EXTRACT_JOBS.get(job_id, {}).get("progress", {}))
+        final_progress.update(
+            {
+                "phase": "Complete",
+                "percent": 100.0,
+                "elapsed_s": result["elapsed_s"],
+                "elapsed": f"{result['elapsed_s']:.2f}s",
+                "eta_s": 0,
+                "eta": "00:00",
+                "message": f"Copied {result['copied']} series samples",
+                "done": True,
+                "error": None,
+            }
+        )
+        _set_extract_job(
+            job_id,
+            {
+                "status": "done",
+                "result": result,
+                "progress": final_progress,
+            },
+        )
+    except Exception as exc:
+        _set_extract_job(
+            job_id,
+            {
+                "status": "error",
+                "error": str(exc),
+                "progress": {
+                    "phase": "Error",
+                    "current": 0,
+                    "total": 0,
+                    "percent": 0.0,
+                    "elapsed": "--:--",
+                    "eta": "--:--",
+                    "memory_mb": 0,
+                    "message": str(exc),
+                    "done": True,
+                    "error": str(exc),
+                },
+            },
+        )
+
+
+@app.route('/extract-one-per-series/start', methods=['POST'])
+def start_extract_one_per_series():
+    input_root = (request.form.get("input_root") or "").strip()
+    output_root = (request.form.get("output_root") or "").strip() or ONE_PER_SERIES_OUTPUT_DISPLAY
+    if not input_root:
+        return jsonify({"success": False, "message": "Input path is required."}), 400
+
+    input_path = Path(input_root).expanduser().resolve()
+    output_path = resolve_extract_output_path(output_root)
+    if not input_path.is_dir():
+        return jsonify({"success": False, "message": "Input path is not a directory."}), 400
+    if input_path == output_path:
+        return jsonify({"success": False, "message": "Output path must differ from input path."}), 400
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    job_id = uuid.uuid4().hex
+    with EXTRACT_JOBS_LOCK:
+        EXTRACT_JOBS[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "input_root": str(input_path),
+            "output_root": str(output_path),
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "progress": {
+                "phase": "Queued",
+                "current": 0,
+                "total": 0,
+                "percent": 0.0,
+                "elapsed": "00:00",
+                "eta": "--:--",
+                "memory_mb": 0,
+                "message": "Queued",
+                "done": False,
+                "error": None,
+            },
+        }
+
+    thread = threading.Thread(
+        target=_run_extract_job,
+        args=(job_id, str(input_path), str(output_path)),
+        daemon=True,
+    )
+    thread.start()
+    return jsonify({"success": True, "job_id": job_id})
+
+
+@app.route('/extract-one-per-series/jobs')
+def extract_one_per_series_jobs():
+    with EXTRACT_JOBS_LOCK:
+        jobs = sorted(
+            (dict(job) for job in EXTRACT_JOBS.values()),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        )
+    return jsonify({"success": True, "jobs": jobs})
+
+
+@app.route('/filesystem/directories')
+def filesystem_directories():
+    requested_path = (request.args.get("path") or "").strip()
+    if requested_path:
+        current_path = Path(requested_path).expanduser().resolve()
+    else:
+        current_path = Path.home().resolve()
+
+    if not current_path.exists() or not current_path.is_dir():
+        return jsonify({"success": False, "message": "Directory not found."}), 404
+
+    directories = []
+    try:
+        for child in current_path.iterdir():
+            if child.name.startswith("."):
+                continue
+            try:
+                if child.is_dir():
+                    directories.append({"name": child.name, "path": str(child.resolve())})
+            except OSError:
+                continue
+    except PermissionError:
+        return jsonify({"success": False, "message": "Permission denied."}), 403
+    except OSError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+
+    directories.sort(key=lambda item: item["name"].lower())
+    parent = current_path.parent if current_path.parent != current_path else None
+    return jsonify(
+        {
+            "success": True,
+            "path": str(current_path),
+            "parent": str(parent) if parent else None,
+            "home": str(Path.home().resolve()),
+            "directories": directories,
+        }
+    )
 
 
 @app.route('/databanks/create', methods=['POST'])
@@ -1613,6 +1792,7 @@ def index():
     )
 
     translations = get_translations()
+    ensure_one_per_series_output_dir()
     databanks = list_databanks()
     context = _index_template_context(
         db_name=db_name,
@@ -1633,6 +1813,7 @@ def index():
     context["anonymize_fields"] = build_anonymize_fields(translations)
     context["export_sections"], _ = build_export_sections(translations)
     context["export_modalities"] = []
+    context["one_per_series_output_dir"] = ONE_PER_SERIES_OUTPUT_DISPLAY
 
     if not os.path.exists(db_path):
         context["error"] = "Database not found"

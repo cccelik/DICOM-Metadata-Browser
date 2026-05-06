@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 from dicom_browser.dicom_discovery import collect_dicom_files, is_dicom_candidate
 from dicom_browser.extract_metadata import extract_metadata_from_paths
+from dicom_browser.progress import ProgressCallback, ProgressTracker, TerminalProgress
 from dicom_browser.qa_utils import (
     calculate_raw_injection_delay_minutes,
     compute_delay_minutes as shared_compute_delay_minutes,
@@ -121,6 +122,7 @@ def _bulk_insert_metadata(
     batch_size: int = 500,
     progress_total: Optional[int] = None,
     vprint=None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> Tuple[int, int, int]:
     from dicom_browser.store_metadata import insert_metadata
 
@@ -149,6 +151,8 @@ def _bulk_insert_metadata(
                 skipped_duplicates += 1
             else:
                 skipped_invalid += 1
+            if progress_callback:
+                progress_callback({})
         conn.commit()
         batch_metadata.clear()
         batch_paths.clear()
@@ -192,6 +196,7 @@ def _extract_and_store(
     max_workers: Optional[int],
     progress_total: Optional[int] = None,
     vprint=None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> Tuple[int, int, int, List[Tuple[Path, object]], Dict[str, float]]:
     timings: Dict[str, float] = {}
 
@@ -199,6 +204,7 @@ def _extract_and_store(
     metadata_entries = extract_metadata_from_paths(
         dcm_files,
         max_workers=max_workers,
+        progress_callback=lambda _path, _meta: progress_callback({}) if progress_callback else None,
     )
     timings["extract_metadata_s"] = time.perf_counter() - t_extract
     skipped_invalid = len(dcm_files) - len(metadata_entries)
@@ -211,6 +217,7 @@ def _extract_and_store(
         scan_root,
         progress_total=progress_total,
         vprint=vprint,
+        progress_callback=progress_callback,
     )
     timings["insert_metadata_s"] = time.perf_counter() - t_insert
     skipped_invalid += skipped_invalid_insert
@@ -225,6 +232,7 @@ def process_single_scan(
     max_workers: Optional[int] = None,
     existing_paths: Optional[set] = None,
     scan_root_label: Optional[str] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> Tuple[int, int, int, List[str], Dict[str, float]]:
     """Process a single scan directory and store its metadata in the database."""
     from dicom_browser.store_metadata import study_exists
@@ -252,6 +260,7 @@ def process_single_scan(
         max_workers=max_workers,
         progress_total=None,
         vprint=None,
+        progress_callback=progress_callback,
     )
     timings.update(extract_insert_timings)
 
@@ -282,6 +291,7 @@ def process_directory(
     skip_existing_paths: bool = False,
     auto_workers: bool = True,
     scan_root_label: Optional[str] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ):
     """Process all DICOM files in a directory, ZIP, or 7Z file and store metadata.
 
@@ -428,6 +438,34 @@ def process_directory(
         rows = conn.execute("SELECT file_path FROM dicom_metadata").fetchall()
         existing_paths = {row[0] for row in rows}
 
+    progress_tracker: Optional[ProgressTracker] = None
+    if progress_callback:
+        if dicom_path.is_file():
+            candidate_files = [dicom_path] if is_dicom_candidate(dicom_path) else []
+            progress_base = dicom_path.parent
+        else:
+            candidate_files = collect_dicom_files(dicom_path, recursive=True)
+            progress_base = dicom_path
+        candidate_files, _progress_skipped_existing = _filter_existing_paths(
+            candidate_files,
+            progress_base,
+            existing_paths,
+        )
+        progress_tracker = ProgressTracker(
+            total=len(candidate_files) * 2,
+            phase="Processing",
+            callback=progress_callback,
+        )
+        progress_tracker.emit()
+
+    def _advance_progress(_event: dict) -> None:
+        if progress_tracker:
+            progress_tracker.update(advance=1)
+
+    def _finish_progress(message: str) -> None:
+        if progress_tracker:
+            progress_tracker.finish(message)
+
     if dicom_path.is_file():
         _vprint(f"📄 Processing single file: {dicom_path.name}")
         dcm_files = [dicom_path] if is_dicom_candidate(dicom_path) else []
@@ -452,6 +490,7 @@ def process_directory(
                     _vprint("   Cleaned up temporary extraction directory")
                 except OSError:
                     pass
+            _finish_progress("No DICOM files found")
             _print_timing()
             return
 
@@ -463,6 +502,7 @@ def process_directory(
             max_workers=max_workers,
             progress_total=len(dcm_files),
             vprint=_vprint,
+            progress_callback=_advance_progress,
         )
         extract_timings.update(run_timings)
         skipped_duplicates = skipped_existing + skipped_dup_insert
@@ -508,6 +548,7 @@ def process_directory(
                         max_workers=max_workers,
                         existing_paths=existing_paths,
                         scan_root_label=scan_root_label,
+                        progress_callback=_advance_progress,
                     )
                     if timing and scan_timings:
                         _vprint("      ⏱️ scan timings:")
@@ -550,6 +591,7 @@ def process_directory(
                         max_workers=max_workers,
                         existing_paths=existing_paths,
                         scan_root_label=scan_root_label,
+                        progress_callback=_advance_progress,
                     )
                     if timing and scan_timings:
                         _vprint("      ⏱️ scan timings:")
@@ -608,6 +650,7 @@ def process_directory(
                 if not dcm_files:
                     _vprint("   ⚠️  No DICOM files found")
                     conn.close()
+                    _finish_progress("No DICOM files found")
                     _print_timing()
                     return
 
@@ -621,6 +664,7 @@ def process_directory(
                     max_workers=max_workers,
                     progress_total=len(dcm_files),
                     vprint=_vprint,
+                    progress_callback=_advance_progress,
                 )
                 extract_timings.update(run_timings)
                 skipped_duplicates = skipped_existing + skipped_dup_insert
@@ -652,6 +696,7 @@ def process_directory(
                         _vprint("   Cleaned up temporary extraction directory")
                     except OSError:
                         pass
+                _finish_progress("No DICOM files found")
                 _print_timing()
                 return
 
@@ -665,6 +710,7 @@ def process_directory(
                 max_workers=max_workers,
                 progress_total=len(dcm_files),
                 vprint=_vprint,
+                progress_callback=_advance_progress,
             )
             extract_timings.update(run_timings)
             skipped_duplicates = skipped_existing + skipped_dup_insert
@@ -678,6 +724,7 @@ def process_directory(
     else:
         _vprint("Error: Input path must be a directory, archive, or DICOM file")
         conn.close()
+        _finish_progress("Input path is invalid")
         _print_timing()
         return
 
@@ -701,6 +748,8 @@ def process_directory(
         except OSError as e:
             _vprint(f"   ⚠ Warning: Could not clean up temp directory: {e}")
 
+    if progress_tracker:
+        progress_tracker.finish("Processing complete")
     print("Processing ended")
     _print_timing(extract_timings)
 
@@ -757,6 +806,7 @@ if __name__ == "__main__":
     if args.max_workers is not None and args.max_workers < 1:
         parser.error("--max-workers must be greater than zero")
 
+    terminal_progress = TerminalProgress("process_dicom")
     process_directory(
         args.dicom_dir,
         db_path=args.db_path,
@@ -766,4 +816,5 @@ if __name__ == "__main__":
         verbose=args.verbose,
         skip_existing_paths=args.skip_existing_paths,
         auto_workers=not args.no_auto_workers,
+        progress_callback=terminal_progress,
     )

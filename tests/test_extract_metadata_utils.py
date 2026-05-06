@@ -8,6 +8,11 @@ from pydicom.dataset import Dataset
 from pydicom.tag import Tag
 
 
+TEST_STUDY_UID = "1.2.826.0.1.3680043.10.543.1"
+TEST_SERIES_UID = "1.2.826.0.1.3680043.10.543.2"
+TEST_SOP_UID = "1.2.826.0.1.3680043.10.543.3"
+
+
 class Dummy:
     def __init__(self):
         self.text = "  value  "
@@ -96,9 +101,9 @@ class ExtractMetadataUtilsTests(unittest.TestCase):
         metadata = extract_metadata.DICOMMetadata(
             manufacturer="SIEMENS",
             modality="PT",
-            study_instance_uid="STUDY1",
-            series_instance_uid="SERIES1",
-            sop_instance_uid="SOP1",
+            study_instance_uid=TEST_STUDY_UID,
+            series_instance_uid=TEST_SERIES_UID,
+            sop_instance_uid=TEST_SOP_UID,
         )
 
         creator_map = extract_metadata._build_private_creator_map(ds)
@@ -113,9 +118,9 @@ class ExtractMetadataUtilsTests(unittest.TestCase):
     def test_extract_metadata_reads_additional_export_fields(self):
         ds = Dataset()
         ds.PatientID = "P1"
-        ds.StudyInstanceUID = "STUDY1"
-        ds.SeriesInstanceUID = "SERIES1"
-        ds.SOPInstanceUID = "SOP1"
+        ds.StudyInstanceUID = TEST_STUDY_UID
+        ds.SeriesInstanceUID = TEST_SERIES_UID
+        ds.SOPInstanceUID = TEST_SOP_UID
         ds.SoftwareVersions = "VG80B"
         ds.ReconstructionMethod = "PSF+TOF 4i5s"
         ds.Rows = 440
@@ -144,11 +149,11 @@ class ExtractMetadataUtilsTests(unittest.TestCase):
     def test_extract_metadata_prefers_number_of_slices_over_images_in_acquisition(self):
         ds = Dataset()
         ds.PatientID = "P1"
-        ds.StudyInstanceUID = "STUDY1"
-        ds.SeriesInstanceUID = "SERIES1"
-        ds.SOPInstanceUID = "SOP1"
-        ds.NumberOfSlices = "123"
-        ds.ImagesInAcquisition = "456"
+        ds.StudyInstanceUID = TEST_STUDY_UID
+        ds.SeriesInstanceUID = TEST_SERIES_UID
+        ds.SOPInstanceUID = TEST_SOP_UID
+        ds.NumberOfSlices = 123
+        ds.ImagesInAcquisition = 456
 
         with TemporaryDirectory() as td:
             dcm_path = Path(td) / "sample.dcm"
