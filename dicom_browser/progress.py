@@ -34,9 +34,9 @@ def _rss_unit_divisor() -> int:
     return 1024 * 1024 if sys.platform == "darwin" else 1024
 
 
-def current_memory_mb() -> float:
+def current_memory_mb() -> Optional[float]:
     if resource is None:
-        return 0.0
+        return None
     usage = resource.getrusage(resource.RUSAGE_SELF)
     return float(usage.ru_maxrss) / _rss_unit_divisor()
 
@@ -49,7 +49,7 @@ class ProgressState:
     percent: float
     elapsed_s: float
     eta_s: Optional[float]
-    memory_mb: float
+    memory_mb: Optional[float]
     message: str = ""
     done: bool = False
     error: Optional[str] = None
@@ -177,9 +177,10 @@ class TerminalProgress:
         phase = str(payload.get("phase") or self.label)
         eta = payload.get("eta") or "--:--"
         elapsed = payload.get("elapsed") or "00:00"
-        memory = float(payload.get("memory_mb") or 0.0)
+        memory = payload.get("memory_mb")
+        memory_text = "" if memory is None else f" mem {float(memory):.1f} MB"
         prefix = f"{self.label}: {phase} "
-        suffix = f" {percent:5.1f}% {current}/{total} ETA {eta} elapsed {elapsed} mem {memory:.1f} MB"
+        suffix = f" {percent:5.1f}% {current}/{total} ETA {eta} elapsed {elapsed}{memory_text}"
         bar_width = max(8, min(self.width, columns - len(prefix) - len(suffix) - 2))
         if bar_width <= 8 and len(prefix) + len(suffix) + bar_width + 2 > columns:
             prefix = f"{phase} "
