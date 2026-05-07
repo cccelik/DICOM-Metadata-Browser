@@ -197,10 +197,15 @@ def _extract_and_store(
     progress_total: Optional[int] = None,
     vprint=None,
     progress_callback: Optional[ProgressCallback] = None,
+    insert_progress_callback: Optional[ProgressCallback] = None,
+    parse_start_callback=None,
+    insert_start_callback=None,
 ) -> Tuple[int, int, int, List[Tuple[Path, object]], Dict[str, float]]:
     timings: Dict[str, float] = {}
 
     t_extract = time.perf_counter()
+    if parse_start_callback:
+        parse_start_callback(len(dcm_files))
     metadata_entries = extract_metadata_from_paths(
         dcm_files,
         max_workers=max_workers,
@@ -210,6 +215,8 @@ def _extract_and_store(
     skipped_invalid = len(dcm_files) - len(metadata_entries)
 
     t_insert = time.perf_counter()
+    if insert_start_callback:
+        insert_start_callback(len(metadata_entries))
     processed, skipped_dup_insert, skipped_invalid_insert = _bulk_insert_metadata(
         conn,
         metadata_entries,
@@ -217,7 +224,7 @@ def _extract_and_store(
         scan_root,
         progress_total=progress_total,
         vprint=vprint,
-        progress_callback=progress_callback,
+        progress_callback=insert_progress_callback or progress_callback,
     )
     timings["insert_metadata_s"] = time.perf_counter() - t_insert
     skipped_invalid += skipped_invalid_insert
@@ -233,6 +240,9 @@ def process_single_scan(
     existing_paths: Optional[set] = None,
     scan_root_label: Optional[str] = None,
     progress_callback: Optional[ProgressCallback] = None,
+    insert_progress_callback: Optional[ProgressCallback] = None,
+    parse_start_callback=None,
+    insert_start_callback=None,
 ) -> Tuple[int, int, int, List[str], Dict[str, float]]:
     """Process a single scan directory and store its metadata in the database."""
     from dicom_browser.store_metadata import study_exists
@@ -261,6 +271,9 @@ def process_single_scan(
         progress_total=None,
         vprint=None,
         progress_callback=progress_callback,
+        insert_progress_callback=insert_progress_callback,
+        parse_start_callback=parse_start_callback,
+        insert_start_callback=insert_start_callback,
     )
     timings.update(extract_insert_timings)
 
@@ -427,12 +440,6 @@ def process_directory(
     # Initialize database
     conn = init_database(db_path)
 
-    if auto_workers and max_workers is None:
-        sample_paths = _sample_dicom_files(dicom_path)
-        tuned_workers = _auto_tune_workers(sample_paths)
-        if tuned_workers:
-            max_workers = tuned_workers
-
     existing_paths = None
     if skip_existing_paths:
         rows = conn.execute("SELECT file_path FROM dicom_metadata").fetchall()
@@ -453,16 +460,40 @@ def process_directory(
             existing_paths,
         )
         progress_file_units = len(candidate_files) * 2
+        cleanup_units = 1 if temp_extract_dir else 0
         progress_tracker = ProgressTracker(
-            total=progress_file_units + 1,
-            phase="Processing",
+            total=progress_file_units + 1 + cleanup_units,
+            phase="Candidate finding",
             callback=progress_callback,
         )
-        progress_tracker.emit()
+        progress_tracker.update(0, message=f"Found {len(candidate_files)} candidate files")
 
-    def _advance_progress(_event: dict) -> None:
+    if auto_workers and max_workers is None:
         if progress_tracker:
-            progress_tracker.update(advance=1)
+            progress_tracker.update(phase="Auto-tuning", message="Choosing worker count")
+        sample_paths = _sample_dicom_files(dicom_path)
+        tuned_workers = _auto_tune_workers(sample_paths)
+        if tuned_workers:
+            max_workers = tuned_workers
+        if progress_tracker:
+            worker_label = max_workers if max_workers is not None else "default"
+            progress_tracker.update(phase="Auto-tuning", message=f"Using {worker_label} workers")
+
+    def _advance_parsing_progress(_event: dict) -> None:
+        if progress_tracker:
+            progress_tracker.update(advance=1, phase="Parsing")
+
+    def _advance_insertion_progress(_event: dict) -> None:
+        if progress_tracker:
+            progress_tracker.update(advance=1, phase="Insertion")
+
+    def _start_parsing(total: int) -> None:
+        if progress_tracker:
+            progress_tracker.update(phase="Parsing", message=f"Reading metadata from {total} candidate files")
+
+    def _start_insertion(total: int) -> None:
+        if progress_tracker:
+            progress_tracker.update(phase="Insertion", message=f"Writing {total} metadata records to databank")
 
     def _finish_progress(message: str) -> None:
         if progress_tracker:
@@ -504,7 +535,10 @@ def process_directory(
             max_workers=max_workers,
             progress_total=len(dcm_files),
             vprint=_vprint,
-            progress_callback=_advance_progress,
+            progress_callback=_advance_parsing_progress,
+            insert_progress_callback=_advance_insertion_progress,
+            parse_start_callback=_start_parsing,
+            insert_start_callback=_start_insertion,
         )
         extract_timings.update(run_timings)
         skipped_duplicates = skipped_existing + skipped_dup_insert
@@ -550,7 +584,10 @@ def process_directory(
                         max_workers=max_workers,
                         existing_paths=existing_paths,
                         scan_root_label=scan_root_label,
-                        progress_callback=_advance_progress,
+                        progress_callback=_advance_parsing_progress,
+                        insert_progress_callback=_advance_insertion_progress,
+                        parse_start_callback=_start_parsing,
+                        insert_start_callback=_start_insertion,
                     )
                     if timing and scan_timings:
                         _vprint("      ⏱️ scan timings:")
@@ -593,7 +630,10 @@ def process_directory(
                         max_workers=max_workers,
                         existing_paths=existing_paths,
                         scan_root_label=scan_root_label,
-                        progress_callback=_advance_progress,
+                        progress_callback=_advance_parsing_progress,
+                        insert_progress_callback=_advance_insertion_progress,
+                        parse_start_callback=_start_parsing,
+                        insert_start_callback=_start_insertion,
                     )
                     if timing and scan_timings:
                         _vprint("      ⏱️ scan timings:")
@@ -666,7 +706,10 @@ def process_directory(
                     max_workers=max_workers,
                     progress_total=len(dcm_files),
                     vprint=_vprint,
-                    progress_callback=_advance_progress,
+                    progress_callback=_advance_parsing_progress,
+                    insert_progress_callback=_advance_insertion_progress,
+                    parse_start_callback=_start_parsing,
+                    insert_start_callback=_start_insertion,
                 )
                 extract_timings.update(run_timings)
                 skipped_duplicates = skipped_existing + skipped_dup_insert
@@ -712,7 +755,10 @@ def process_directory(
                 max_workers=max_workers,
                 progress_total=len(dcm_files),
                 vprint=_vprint,
-                progress_callback=_advance_progress,
+                progress_callback=_advance_parsing_progress,
+                insert_progress_callback=_advance_insertion_progress,
+                parse_start_callback=_start_parsing,
+                insert_start_callback=_start_insertion,
             )
             extract_timings.update(run_timings)
             skipped_duplicates = skipped_existing + skipped_dup_insert
@@ -742,7 +788,7 @@ def process_directory(
         conn.commit()
         if progress_tracker:
             progress_tracker.update(
-                progress_tracker.total,
+                progress_file_units + 1,
                 phase="Finalizing",
                 message=f"Marked {pruned} non-representative series",
             )
@@ -750,7 +796,7 @@ def process_directory(
     except sqlite3.Error as e:
         if progress_tracker:
             progress_tracker.update(
-                progress_tracker.total,
+                progress_file_units + 1,
                 phase="Finalizing",
                 message=f"Representative-series step skipped: {e}",
             )
@@ -763,7 +809,19 @@ def process_directory(
     if temp_extract_dir:
         try:
             _vprint("   Cleaning up temporary extraction directory...")
+            if progress_tracker:
+                progress_tracker.update(
+                    progress_file_units + 1,
+                    phase="Cleanup",
+                    message="Cleaning up temporary extraction directory",
+                )
             shutil.rmtree(temp_extract_dir)
+            if progress_tracker:
+                progress_tracker.update(
+                    progress_tracker.total,
+                    phase="Cleanup",
+                    message="Cleaned up temporary extraction directory",
+                )
             _vprint("   ✓ Cleaned up")
         except OSError as e:
             _vprint(f"   ⚠ Warning: Could not clean up temp directory: {e}")

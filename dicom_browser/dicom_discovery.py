@@ -30,7 +30,7 @@ def has_dicom_signature(path: Path) -> bool:
 
 def can_parse_as_dicom(path: Path) -> bool:
     try:
-        pydicom.dcmread(path, stop_before_pixels=True, force=True)
+        pydicom.dcmread(path, stop_before_pixels=True, force=False)
         return True
     except (InvalidDicomError, OSError, PermissionError, ValueError):
         return False

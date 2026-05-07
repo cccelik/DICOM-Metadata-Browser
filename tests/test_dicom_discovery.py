@@ -75,6 +75,13 @@ class DicomDiscoveryTests(unittest.TestCase):
             link.symlink_to(target)
             self.assertFalse(dicom_discovery.is_dicom_candidate(link))
 
+    def test_is_dicom_candidate_rejects_extensionless_text_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            license_file = base / "LICENSE"
+            license_file.write_text("License\nThis is not a DICOM file.")
+            self.assertFalse(dicom_discovery.is_dicom_candidate(license_file))
+
 
 if __name__ == "__main__":
     unittest.main()

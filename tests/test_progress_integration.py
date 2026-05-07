@@ -37,8 +37,13 @@ class ProgressIntegrationTests(unittest.TestCase):
 
             def fake_extract_and_store(*args, **kwargs):
                 progress_callback = kwargs.get("progress_callback")
-                for _ in range(4):
+                insert_progress_callback = kwargs.get("insert_progress_callback")
+                kwargs["parse_start_callback"](2)
+                for _ in range(2):
                     progress_callback({})
+                kwargs["insert_start_callback"](2)
+                for _ in range(2):
+                    insert_progress_callback({})
                 return 0, 0, 0, [], {"extract_metadata_s": 0.01}
 
             with patch("process_dicom.collect_dicom_files", return_value=dcm_files):
@@ -54,10 +59,14 @@ class ProgressIntegrationTests(unittest.TestCase):
 
             self.assertTrue(events)
             self.assertEqual(events[0]["total"], 5)
-            processing_events = [event for event in events if event["phase"] == "Processing"]
-            self.assertTrue(processing_events)
-            self.assertLess(processing_events[-1]["percent"], 100.0)
-            self.assertIn("Finalizing", [event["phase"] for event in events])
+            phases = [event["phase"] for event in events]
+            self.assertIn("Candidate finding", phases)
+            self.assertIn("Parsing", phases)
+            self.assertIn("Insertion", phases)
+            self.assertIn("Finalizing", phases)
+            insertion_events = [event for event in events if event["phase"] == "Insertion"]
+            self.assertTrue(insertion_events)
+            self.assertLess(insertion_events[-1]["percent"], 100.0)
             self.assertEqual(events[-1]["percent"], 100.0)
             self.assertTrue(events[-1]["done"])
             self.assertEqual(events[-1]["message"], "Processing complete")
