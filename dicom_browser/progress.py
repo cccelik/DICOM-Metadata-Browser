@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import math
 import os
-import resource
+try:
+    import resource
+except ImportError:
+    resource = None
 import shutil
 import sys
 import time
@@ -32,6 +35,8 @@ def _rss_unit_divisor() -> int:
 
 
 def current_memory_mb() -> float:
+    if resource is None:
+        return 0.0
     usage = resource.getrusage(resource.RUSAGE_SELF)
     return float(usage.ru_maxrss) / _rss_unit_divisor()
 
