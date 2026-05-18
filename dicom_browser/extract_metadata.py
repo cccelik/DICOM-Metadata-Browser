@@ -6,6 +6,7 @@ Extracts all important medical and manufacturer metadata from DICOM files.
 
 import argparse
 import hashlib
+import io
 import json
 import struct
 import sys
@@ -18,7 +19,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pydicom  # type: ignore[import]
 from pydicom.errors import InvalidDicomError
 
-from .dicom_discovery import collect_dicom_files, is_metadata_artifact
+from .dicom_discovery import DEFAULT_MAX_FILE_BYTES, collect_dicom_files, is_metadata_artifact
+
+DEFAULT_PARTIAL_READ_BYTES = 25 * 1024 * 1024
 
 
 @dataclass
@@ -440,15 +443,50 @@ def extract_csa_payload(ds: pydicom.Dataset, tag: Tuple[int, int]) -> Tuple[Opti
     return json.dumps(parsed, ensure_ascii=True), digest
 
 
-def extract_metadata(dcm_path: Path) -> Optional[DICOMMetadata]:
+def _read_dicom_dataset(
+    dcm_path: Path,
+    max_full_file_bytes: Optional[int] = DEFAULT_MAX_FILE_BYTES,
+    partial_read_oversized: bool = True,
+    partial_read_limit_bytes: int = DEFAULT_PARTIAL_READ_BYTES,
+):
+    oversized = False
+    if max_full_file_bytes:
+        try:
+            oversized = dcm_path.stat().st_size > max_full_file_bytes
+        except (OSError, PermissionError):
+            oversized = False
+
+    if oversized and partial_read_oversized:
+        with dcm_path.open("rb") as fh:
+            data = fh.read(max(132, partial_read_limit_bytes))
+        return pydicom.dcmread(
+            io.BytesIO(data),
+            stop_before_pixels=True,
+            force=False,
+        )
+
+    return pydicom.dcmread(dcm_path, stop_before_pixels=True, force=False)
+
+
+def extract_metadata(
+    dcm_path: Path,
+    max_full_file_bytes: Optional[int] = DEFAULT_MAX_FILE_BYTES,
+    partial_read_oversized: bool = True,
+    partial_read_limit_bytes: int = DEFAULT_PARTIAL_READ_BYTES,
+) -> Optional[DICOMMetadata]:
     """Extract all important metadata from a DICOM file"""
     # Skip macOS metadata files
     if dcm_path.name.startswith('._') or '__MACOSX' in str(dcm_path):
         return None
 
     try:
-        ds = pydicom.dcmread(dcm_path, stop_before_pixels=True, force=False)
-    except (InvalidDicomError, OSError, ValueError):
+        ds = _read_dicom_dataset(
+            dcm_path,
+            max_full_file_bytes=max_full_file_bytes,
+            partial_read_oversized=partial_read_oversized,
+            partial_read_limit_bytes=partial_read_limit_bytes,
+        )
+    except (EOFError, InvalidDicomError, OSError, ValueError):
         # Silently skip files that can't be read (macOS metadata, invalid DICOM, etc.)
         return None
 
@@ -631,6 +669,9 @@ def extract_metadata_from_paths(
     dcm_paths: List[Path],
     max_workers: Optional[int] = None,
     progress_callback: Optional[Callable[[Path, Optional[DICOMMetadata]], None]] = None,
+    max_full_file_bytes: Optional[int] = DEFAULT_MAX_FILE_BYTES,
+    partial_read_oversized: bool = True,
+    partial_read_limit_bytes: int = DEFAULT_PARTIAL_READ_BYTES,
 ) -> List[Tuple[Path, DICOMMetadata]]:
     """Extract metadata for a list of DICOM files using a process pool."""
     filtered_paths = [
@@ -648,7 +689,16 @@ def extract_metadata_from_paths(
     metadata_list: List[Tuple[Path, DICOMMetadata]] = []
 
     with ProcessPoolExecutor(max_workers=workers) as executor:
-        futures = {executor.submit(extract_metadata, path): path for path in filtered_paths}
+        futures = {
+            executor.submit(
+                extract_metadata,
+                path,
+                max_full_file_bytes,
+                partial_read_oversized,
+                partial_read_limit_bytes,
+            ): path
+            for path in filtered_paths
+        }
 
         for future in as_completed(futures):
             dcm_path = futures[future]
@@ -664,12 +714,18 @@ def extract_metadata_from_paths(
 def extract_all_metadata(
     directory: Path,
     max_workers: Optional[int] = None,
+    max_full_file_bytes: Optional[int] = DEFAULT_MAX_FILE_BYTES,
+    partial_read_oversized: bool = True,
+    partial_read_limit_bytes: int = DEFAULT_PARTIAL_READ_BYTES,
 ) -> List[Tuple[Path, DICOMMetadata]]:
     """Extract metadata from all DICOM files in a directory using a process pool."""
     dcm_files = collect_dicom_files(directory)
     return extract_metadata_from_paths(
         dcm_files,
         max_workers=max_workers,
+        max_full_file_bytes=max_full_file_bytes,
+        partial_read_oversized=partial_read_oversized,
+        partial_read_limit_bytes=partial_read_limit_bytes,
     )
 
 

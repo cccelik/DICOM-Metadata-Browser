@@ -483,6 +483,39 @@
             flex: 1;
         }
 
+        .extract-help {
+            margin-top: 6px;
+            color: #7f8c8d;
+            font-size: 12px;
+        }
+
+        .analysis-panel {
+            display: none;
+            margin-top: 10px;
+            padding: 10px 12px;
+            border: 1px solid #d7dde4;
+            border-radius: 8px;
+            background: #f8f9fb;
+            color: #2c3e50;
+            font-size: 13px;
+        }
+
+        .analysis-panel.open {
+            display: block;
+        }
+
+        .analysis-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 8px;
+        }
+
+        .analysis-value {
+            display: block;
+            font-weight: 700;
+            color: #1f4b99;
+        }
+
         .folder-picker-toolbar {
             display: flex;
             gap: 8px;
@@ -609,6 +642,7 @@
         body.dark .extract-field input,
         body.dark .extract-field select,
         body.dark .extract-job,
+        body.dark .analysis-panel,
         body.dark .folder-picker-path,
         body.dark .folder-picker-list {
             background: #121a24;
@@ -618,6 +652,10 @@
 
         body.dark .extract-checkbox {
             color: #e6edf3;
+        }
+
+        body.dark .analysis-value {
+            color: #8fb4ff;
         }
 
         body.dark .extract-mode-option {
@@ -667,6 +705,7 @@
         {% call menu_section('top-index-tools', t.tools or 'Tools') %}
             <button type="button" onclick="openProcessModal(); closeTopMenu();" class="menu-upload">{{ t.process_dicom or 'Process DICOM' }}</button>
             <button type="button" onclick="openExtractModal(); closeTopMenu();" class="menu-upload">{{ t.extract_one_per_series or 'Extract One Per Series' }}</button>
+            <button type="button" onclick="openExtractProcessModal(); closeTopMenu();" class="menu-upload">{{ t.extract_and_process or 'Extract and Process' }}</button>
             <button type="button" onclick="toggleUploadZone(); closeTopMenu();" class="menu-upload">{{ t.upload }}</button>
         {% endcall %}
         {% call menu_section('top-index-export', t.export or 'Export') %}
@@ -949,10 +988,10 @@
             <div class="export-modal-body">
                 <form id="process-form" class="extract-form">
                     <div class="extract-field">
-                        <label for="process-input-root">{{ t.input_root or 'Input root' }}</label>
+                        <label for="process-input-root">{{ t.input_source or 'Input source' }}</label>
                         <div class="extract-path-row">
-                            <input id="process-input-root" name="input_root" type="text" placeholder="/path/to/dicom_root" autocomplete="off">
-                            <button type="button" class="selection-button" data-folder-target="process-input-root">{{ t.browse or 'Browse' }}</button>
+                            <input id="process-input-root" name="input_root" type="text" placeholder="/path/to/dicom_root_or_archive.zip_or_.7z" autocomplete="off">
+                            <button type="button" class="selection-button" data-folder-target="process-input-root" data-include-archives="1" data-archive-mode="process">{{ t.browse or 'Browse' }}</button>
                         </div>
                     </div>
                     <div class="extract-field">
@@ -984,6 +1023,16 @@
                         <label for="process-max-workers">{{ t.max_workers or 'Max workers' }}</label>
                         <input id="process-max-workers" name="max_workers" type="number" min="1" step="1" placeholder="{{ t.auto or 'Auto' }}">
                     </div>
+                    <div class="extract-field">
+                        <label for="process-max-file-mb">{{ t.max_file_size_mb or 'Max file size (MB)' }}</label>
+                        <input id="process-max-file-mb" name="max_file_mb" type="number" min="0" step="1" value="{{ default_max_file_mb }}">
+                        <div class="extract-help">{{ t.max_file_size_help or 'Use 25 for network folders with large raw-data files. Set 0 for no limit.' }}</div>
+                    </div>
+                    <div class="extract-field">
+                        <label for="process-partial-read-mb">{{ t.partial_read_size_mb or 'Oversized header read (MB)' }}</label>
+                        <input id="process-partial-read-mb" name="partial_read_mb" type="number" min="1" step="1" value="{{ default_partial_read_mb }}">
+                        <div class="extract-help">{{ t.partial_read_help or 'Oversized DICOM-like files are read only up to this limit to recover metadata.' }}</div>
+                    </div>
                     <div class="extract-option-row">
                         <label class="extract-checkbox">
                             <input type="checkbox" name="process_subdirs" checked>
@@ -993,11 +1042,18 @@
                             <input type="checkbox" name="skip_existing_paths">
                             <span>{{ t.skip_existing_paths or 'Skip existing paths' }}</span>
                         </label>
+                        <label class="extract-checkbox">
+                            <input type="hidden" name="partial_read_oversized" value="off">
+                            <input type="checkbox" name="partial_read_oversized" checked>
+                            <span>{{ t.partial_read_oversized or 'Try header-only read for oversized files' }}</span>
+                        </label>
                     </div>
                     <div class="export-modal-actions">
+                        <button type="button" class="selection-button" id="process-analyze">{{ t.analyze_input or 'Analyze Input' }}</button>
                         <button type="submit" class="selection-button primary" id="process-submit">{{ t.start_processing or 'Start Processing' }}</button>
                     </div>
                 </form>
+                <div id="process-analysis" class="analysis-panel"></div>
                 <div id="process-jobs" class="extract-jobs"></div>
             </div>
         </div>
@@ -1012,10 +1068,10 @@
             <div class="export-modal-body">
                 <form id="extract-form" class="extract-form">
                     <div class="extract-field">
-                        <label for="extract-input-root">{{ t.input_root or 'Input root' }}</label>
+                        <label for="extract-input-root">{{ t.input_source or 'Input source' }}</label>
                         <div class="extract-path-row">
-                            <input id="extract-input-root" name="input_root" type="text" placeholder="/path/to/input_root" autocomplete="off">
-                            <button type="button" class="selection-button" data-folder-target="extract-input-root">{{ t.browse or 'Browse' }}</button>
+                            <input id="extract-input-root" name="input_root" type="text" placeholder="/path/to/input_root_or_archive.zip_or_.7z" autocomplete="off">
+                            <button type="button" class="selection-button" data-folder-target="extract-input-root" data-include-archives="1" data-archive-mode="extract">{{ t.browse or 'Browse' }}</button>
                         </div>
                     </div>
                     <div class="extract-field">
@@ -1025,11 +1081,105 @@
                             <button type="button" class="selection-button" data-folder-target="extract-output-root">{{ t.browse or 'Browse' }}</button>
                         </div>
                     </div>
+                    <div class="extract-field">
+                        <label for="extract-max-file-mb">{{ t.max_file_size_mb or 'Max file size (MB)' }}</label>
+                        <input id="extract-max-file-mb" name="max_file_mb" type="number" min="0" step="1" value="{{ default_max_file_mb }}">
+                        <div class="extract-help">{{ t.max_file_size_help or 'Use 25 for network folders with large raw-data files. Set 0 for no limit.' }}</div>
+                    </div>
                     <div class="export-modal-actions">
+                        <button type="button" class="selection-button" id="extract-analyze">{{ t.analyze_input or 'Analyze Input' }}</button>
                         <button type="submit" class="selection-button primary" id="extract-submit">{{ t.start_extraction or 'Start Extraction' }}</button>
                     </div>
                 </form>
+                <div id="extract-analysis" class="analysis-panel"></div>
                 <div id="extract-jobs" class="extract-jobs"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="extract-process-modal" class="export-modal" aria-hidden="true">
+        <div class="export-modal-content" role="dialog" aria-modal="true" aria-labelledby="extract-process-modal-title">
+            <div class="export-modal-header">
+                <h3 id="extract-process-modal-title">{{ t.extract_and_process or 'Extract and Process' }}</h3>
+                <button type="button" class="export-modal-close" id="extract-process-modal-close" aria-label="{{ t.close }}">×</button>
+            </div>
+            <div class="export-modal-body">
+                <form id="extract-process-form" class="extract-form">
+                    <div class="extract-field">
+                        <label for="extract-process-input-root">{{ t.input_source or 'Input source' }}</label>
+                        <div class="extract-path-row">
+                            <input id="extract-process-input-root" name="input_root" type="text" placeholder="/path/to/input_root_or_archive.zip_or_.7z" autocomplete="off">
+                            <button type="button" class="selection-button" data-folder-target="extract-process-input-root" data-include-archives="1" data-archive-mode="extract">{{ t.browse or 'Browse' }}</button>
+                        </div>
+                    </div>
+                    <div class="extract-field">
+                        <label for="extract-process-output-root">{{ t.output_root or 'Output root' }}</label>
+                        <div class="extract-path-row">
+                            <input id="extract-process-output-root" name="output_root" type="text" value="{{ one_per_series_output_dir }}" placeholder="/path/to/output_root" autocomplete="off">
+                            <button type="button" class="selection-button" data-folder-target="extract-process-output-root">{{ t.browse or 'Browse' }}</button>
+                        </div>
+                    </div>
+                    <div class="extract-field">
+                        <label>{{ t.databank_mode or 'Databank mode' }}</label>
+                        <div class="extract-mode-row">
+                            <label class="extract-mode-option">
+                                <input type="radio" name="extract_process_db_mode" value="existing" checked>
+                                <span>{{ t.existing_databank or 'Existing databank' }}</span>
+                            </label>
+                            <label class="extract-mode-option">
+                                <input type="radio" name="extract_process_db_mode" value="new">
+                                <span>{{ t.new_databank or 'New databank' }}</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="extract-field" id="extract-process-existing-db-field">
+                        <label for="extract-process-target-db">{{ t.target_databank or 'Target databank' }}</label>
+                        <select id="extract-process-target-db" name="db">
+                            {% for bank in databanks %}
+                            <option value="{{ bank }}" {% if bank == db_name %}selected{% endif %}>{{ bank }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="extract-field hidden" id="extract-process-new-db-field">
+                        <label for="extract-process-new-db">{{ t.new_databank_name or 'New databank name' }}</label>
+                        <input id="extract-process-new-db" name="new_db_name" type="text" placeholder="{{ t.new_databank_name or 'New databank name' }}" autocomplete="off">
+                    </div>
+                    <div class="extract-field">
+                        <label for="extract-process-max-workers">{{ t.max_workers or 'Max workers' }}</label>
+                        <input id="extract-process-max-workers" name="max_workers" type="number" min="1" step="1" placeholder="{{ t.auto or 'Auto' }}">
+                    </div>
+                    <div class="extract-field">
+                        <label for="extract-process-max-file-mb">{{ t.max_file_size_mb or 'Max file size (MB)' }}</label>
+                        <input id="extract-process-max-file-mb" name="max_file_mb" type="number" min="0" step="1" value="{{ default_max_file_mb }}">
+                        <div class="extract-help">{{ t.max_file_size_help or 'Use 25 for network folders with large raw-data files. Set 0 for no limit.' }}</div>
+                    </div>
+                    <div class="extract-field">
+                        <label for="extract-process-partial-read-mb">{{ t.partial_read_size_mb or 'Oversized header read (MB)' }}</label>
+                        <input id="extract-process-partial-read-mb" name="partial_read_mb" type="number" min="1" step="1" value="{{ default_partial_read_mb }}">
+                        <div class="extract-help">{{ t.partial_read_help or 'Oversized DICOM-like files are read only up to this limit to recover metadata.' }}</div>
+                    </div>
+                    <div class="extract-option-row">
+                        <label class="extract-checkbox">
+                            <input type="checkbox" name="process_subdirs" checked>
+                            <span>{{ t.process_subdirectories or 'Process subdirectories' }}</span>
+                        </label>
+                        <label class="extract-checkbox">
+                            <input type="checkbox" name="skip_existing_paths">
+                            <span>{{ t.skip_existing_paths or 'Skip existing paths' }}</span>
+                        </label>
+                        <label class="extract-checkbox">
+                            <input type="hidden" name="partial_read_oversized" value="off">
+                            <input type="checkbox" name="partial_read_oversized" checked>
+                            <span>{{ t.partial_read_oversized or 'Try header-only read for oversized files' }}</span>
+                        </label>
+                    </div>
+                    <div class="export-modal-actions">
+                        <button type="button" class="selection-button" id="extract-process-analyze">{{ t.analyze_input or 'Analyze Input' }}</button>
+                        <button type="submit" class="selection-button primary" id="extract-process-submit">{{ t.start_extract_and_process or 'Start Extract and Process' }}</button>
+                    </div>
+                </form>
+                <div id="extract-process-analysis" class="analysis-panel"></div>
+                <div id="extract-process-jobs" class="extract-jobs"></div>
             </div>
         </div>
     </div>
@@ -1085,6 +1235,8 @@
         const processModalClose = document.getElementById('process-modal-close');
         const processForm = document.getElementById('process-form');
         const processSubmit = document.getElementById('process-submit');
+        const processAnalyze = document.getElementById('process-analyze');
+        const processAnalysis = document.getElementById('process-analysis');
         const processJobs = document.getElementById('process-jobs');
         const processDbModeInputs = Array.from(document.querySelectorAll('input[name="process_db_mode"]'));
         const processExistingDbField = document.getElementById('process-existing-db-field');
@@ -1093,7 +1245,19 @@
         const extractModalClose = document.getElementById('extract-modal-close');
         const extractForm = document.getElementById('extract-form');
         const extractSubmit = document.getElementById('extract-submit');
+        const extractAnalyze = document.getElementById('extract-analyze');
+        const extractAnalysis = document.getElementById('extract-analysis');
         const extractJobs = document.getElementById('extract-jobs');
+        const extractProcessModal = document.getElementById('extract-process-modal');
+        const extractProcessModalClose = document.getElementById('extract-process-modal-close');
+        const extractProcessForm = document.getElementById('extract-process-form');
+        const extractProcessSubmit = document.getElementById('extract-process-submit');
+        const extractProcessAnalyze = document.getElementById('extract-process-analyze');
+        const extractProcessAnalysis = document.getElementById('extract-process-analysis');
+        const extractProcessJobs = document.getElementById('extract-process-jobs');
+        const extractProcessDbModeInputs = Array.from(document.querySelectorAll('input[name="extract_process_db_mode"]'));
+        const extractProcessExistingDbField = document.getElementById('extract-process-existing-db-field');
+        const extractProcessNewDbField = document.getElementById('extract-process-new-db-field');
         const folderPickerModal = document.getElementById('folder-picker-modal');
         const folderPickerClose = document.getElementById('folder-picker-close');
         const folderPickerCancel = document.getElementById('folder-picker-cancel');
@@ -1106,14 +1270,35 @@
         let folderPickerCurrentPath = '';
         let folderPickerParentPath = null;
         let folderPickerHomePath = null;
+        let folderPickerIncludeArchives = false;
+        let folderPickerArchiveMode = 'process';
         let processPollTimer = null;
         let extractPollTimer = null;
+        let extractProcessPollTimer = null;
         let pendingProcessRefreshUrl = null;
         const processRefreshJobIds = new Set();
         const processHandledJobIds = new Set();
+        const extractProcessRefreshJobIds = new Set();
 
         function hasActiveJobs(jobs) {
             return jobs.some((job) => job.status === 'queued' || job.status === 'running');
+        }
+
+        function isActiveJob(job) {
+            return job.status === 'queued' || job.status === 'running';
+        }
+
+        function cancelJob(endpoint, jobId) {
+            fetch(`${endpoint}/${jobId}`, { method: 'POST' })
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok || !data.success) {
+                        throw new Error(data.message || 'Could not cancel job.');
+                    }
+                })
+                .catch(error => {
+                    alert(error.message || 'Could not cancel job.');
+                });
         }
 
         function hasPendingProcessRefreshJobs() {
@@ -1128,6 +1313,17 @@
             }
             if (processNewDbField) {
                 processNewDbField.classList.toggle('hidden', !useNewDb);
+            }
+        }
+
+        function updateExtractProcessDbMode() {
+            const selectedMode = (extractProcessDbModeInputs.find(input => input.checked) || {}).value || 'existing';
+            const useNewDb = selectedMode === 'new';
+            if (extractProcessExistingDbField) {
+                extractProcessExistingDbField.classList.toggle('hidden', useNewDb);
+            }
+            if (extractProcessNewDbField) {
+                extractProcessNewDbField.classList.toggle('hidden', !useNewDb);
             }
         }
 
@@ -1161,6 +1357,16 @@
             startProcessPolling();
         }
 
+        function openExtractProcessModal() {
+            if (!extractProcessModal) {
+                return;
+            }
+            extractProcessModal.classList.add('open');
+            extractProcessModal.setAttribute('aria-hidden', 'false');
+            pollExtractProcessJobs();
+            startExtractProcessPolling();
+        }
+
         function closeProcessModal() {
             if (!processModal) {
                 return;
@@ -1185,8 +1391,23 @@
             stopExtractPolling();
         }
 
-        function openFolderPicker(targetInputId) {
+        function closeExtractProcessModal() {
+            if (!extractProcessModal) {
+                return;
+            }
+            extractProcessModal.classList.remove('open');
+            extractProcessModal.setAttribute('aria-hidden', 'true');
+            if (pendingProcessRefreshUrl) {
+                window.location.href = pendingProcessRefreshUrl;
+                return;
+            }
+            stopExtractProcessPolling();
+        }
+
+        function openFolderPicker(targetInputId, includeArchives, archiveMode) {
             folderPickerTarget = document.getElementById(targetInputId);
+            folderPickerIncludeArchives = Boolean(includeArchives);
+            folderPickerArchiveMode = archiveMode || 'process';
             if (!folderPickerModal || !folderPickerTarget) {
                 return;
             }
@@ -1208,6 +1429,10 @@
             if (path) {
                 params.set('path', path);
             }
+            if (folderPickerIncludeArchives) {
+                params.set('include_archives', '1');
+                params.set('archive_mode', folderPickerArchiveMode);
+            }
             if (folderPickerList) {
                 folderPickerList.innerHTML = '<div class="folder-picker-empty">{{ t.loading or "Loading..." }}</div>';
             }
@@ -1226,7 +1451,7 @@
                     if (folderPickerUp) {
                         folderPickerUp.disabled = !folderPickerParentPath;
                     }
-                    renderFolderPickerList(data.directories || []);
+                    renderFolderPickerList(data.directories || [], data.archives || []);
                 })
                 .catch(error => {
                     if (folderPickerList) {
@@ -1235,30 +1460,50 @@
                 });
         }
 
-        function renderFolderPickerList(directories) {
+        function renderFolderPickerList(directories, archives) {
             if (!folderPickerList) {
                 return;
             }
-            if (!directories.length) {
+            const archiveList = archives || [];
+            if (!directories.length && !archiveList.length) {
                 folderPickerList.innerHTML = '<div class="folder-picker-empty">{{ t.no_subfolders or "No subfolders" }}</div>';
                 return;
             }
-            folderPickerList.innerHTML = directories.map((directory) => `
+            const directoryItems = directories.map((directory) => `
                 <button type="button" class="folder-picker-item" data-folder-path="${escapeHtml(directory.path)}">
                     <i class="ph ph-folder" aria-hidden="true"></i>
                     <span>${escapeHtml(directory.name)}</span>
                 </button>
             `).join('');
+            const archiveItems = archiveList.map((archive) => `
+                <button type="button" class="folder-picker-item" data-archive-path="${escapeHtml(archive.path)}">
+                    <i class="ph ph-file-archive" aria-hidden="true"></i>
+                    <span>${escapeHtml(archive.name)}</span>
+                </button>
+            `).join('');
+            folderPickerList.innerHTML = directoryItems + archiveItems;
             folderPickerList.querySelectorAll('[data-folder-path]').forEach((button) => {
                 button.addEventListener('click', () => {
                     loadFolderPicker(button.dataset.folderPath || '');
+                });
+            });
+            folderPickerList.querySelectorAll('[data-archive-path]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    if (folderPickerTarget) {
+                        folderPickerTarget.value = button.dataset.archivePath || '';
+                    }
+                    closeFolderPicker();
                 });
             });
         }
 
         document.querySelectorAll('[data-folder-target]').forEach((button) => {
             button.addEventListener('click', () => {
-                openFolderPicker(button.dataset.folderTarget);
+                openFolderPicker(
+                    button.dataset.folderTarget,
+                    button.dataset.includeArchives === '1',
+                    button.dataset.archiveMode || 'process'
+                );
             });
         });
 
@@ -1317,6 +1562,7 @@
                 const message = escapeHtml(progress.message || job.status || '');
                 const outputRoot = escapeHtml(job.output_root || '');
                 const phase = escapeHtml(progress.phase || job.status || '');
+                const cancelButton = isActiveJob(job) ? `<button type="button" class="selection-button" onclick="cancelJob('/extract-one-per-series/cancel', '${escapeHtml(job.id || '')}')">{{ t.cancel or 'Cancel' }}</button>` : '';
                 return `
                     <div class="extract-job ${statusClass}">
                         <div class="extract-job-header">
@@ -1333,6 +1579,7 @@
                             <span>{{ t.elapsed or 'Elapsed' }} ${progress.elapsed || '00:00'}</span>
                             <span>{{ t.memory or 'Memory' }} ${memory} MB</span>
                             <span>${message}</span>
+                            ${cancelButton}
                         </div>
                     </div>
                 `;
@@ -1356,6 +1603,7 @@
                 const dbName = escapeHtml(job.db_name || '');
                 const inputRoot = escapeHtml(job.input_root || '');
                 const phase = escapeHtml(progress.phase || job.status || '');
+                const cancelButton = isActiveJob(job) ? `<button type="button" class="selection-button" onclick="cancelJob('/process-dicom/cancel', '${escapeHtml(job.id || '')}')">{{ t.cancel or 'Cancel' }}</button>` : '';
                 return `
                     <div class="extract-job ${statusClass}">
                         <div class="extract-job-header">
@@ -1373,10 +1621,197 @@
                             <span>{{ t.elapsed or 'Elapsed' }} ${progress.elapsed || '00:00'}</span>
                             <span>{{ t.memory or 'Memory' }} ${memory} MB</span>
                             <span>${message}</span>
+                            ${cancelButton}
                         </div>
                     </div>
                 `;
             }).join('');
+        }
+
+        function renderExtractProcessJobs(jobs) {
+            if (!extractProcessJobs) {
+                return;
+            }
+            if (!jobs.length) {
+                extractProcessJobs.innerHTML = '';
+                return;
+            }
+            extractProcessJobs.innerHTML = jobs.map((job) => {
+                const progress = job.progress || {};
+                const percent = Number(progress.percent || 0);
+                const statusClass = job.status === 'error' ? 'error' : (job.status === 'done' ? 'done' : '');
+                const memory = Number(progress.memory_mb || 0).toFixed(1);
+                const message = escapeHtml(progress.message || job.status || '');
+                const dbName = escapeHtml(job.db_name || '');
+                const inputRoot = escapeHtml(job.input_root || '');
+                const outputRoot = escapeHtml(job.output_root || '');
+                const phase = escapeHtml(progress.phase || job.status || '');
+                const cancelButton = isActiveJob(job) ? `<button type="button" class="selection-button" onclick="cancelJob('/extract-and-process/cancel', '${escapeHtml(job.id || '')}')">{{ t.cancel or 'Cancel' }}</button>` : '';
+                const timings = progress.total_elapsed ? `
+                    <span>{{ t.extract or 'Extract' }} ${progress.extract_elapsed || '00:00'}</span>
+                    <span>{{ t.process or 'Process' }} ${progress.process_elapsed || '00:00'}</span>
+                    <span>{{ t.total or 'Total' }} ${progress.total_elapsed || '00:00'}</span>
+                ` : '';
+                return `
+                    <div class="extract-job ${statusClass}">
+                        <div class="extract-job-header">
+                            <strong>${phase}</strong>
+                            <span>${percent.toFixed(1)}%</span>
+                        </div>
+                        <div class="extract-job-path">${dbName}</div>
+                        <div class="extract-job-path">${inputRoot}</div>
+                        <div class="extract-job-path">${outputRoot}</div>
+                        <div class="extract-progress-track" aria-label="Extract and process progress">
+                            <div class="extract-progress-fill" style="width: ${Math.max(0, Math.min(100, percent))}%"></div>
+                        </div>
+                        <div class="extract-job-meta">
+                            <span>${progress.current || 0}/${progress.total || 100}</span>
+                            <span>{{ t.eta or 'ETA' }} ${progress.eta || '--:--'}</span>
+                            <span>{{ t.elapsed or 'Elapsed' }} ${progress.elapsed || '00:00'}</span>
+                            <span>{{ t.memory or 'Memory' }} ${memory} MB</span>
+                            ${timings}
+                            <span>${message}</span>
+                            ${cancelButton}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderAnalysis(panel, analysis) {
+            if (!panel) {
+                return;
+            }
+            const largest = (analysis.largest_oversized || []).slice(0, 5);
+            const largestHtml = largest.length ? `
+                <div style="margin-top: 10px;">
+                    <strong>{{ t.largest_oversized_files or 'Largest oversized files' }}</strong>
+                    ${largest.map((item) => `
+                        <div class="extract-job-path">${escapeHtml(item.size || '')} - ${escapeHtml(item.path || '')}</div>
+                    `).join('')}
+                </div>
+            ` : '';
+            panel.innerHTML = `
+                <div class="analysis-grid">
+                    <div>{{ t.total_size or 'Total size' }}<span class="analysis-value">${escapeHtml(analysis.total_size || '')}</span></div>
+                    <div>{{ t.candidate_files or 'Candidate files' }}<span class="analysis-value">${analysis.candidate_files || 0}</span></div>
+                    <div>{{ t.oversized_dicom_like or 'Oversized DICOM-like' }}<span class="analysis-value">${analysis.oversized_dicom_like_files || 0} / ${escapeHtml(analysis.oversized_dicom_like_size || '')}</span></div>
+                    <div>{{ t.estimated_raw_like or 'Estimated raw-like' }}<span class="analysis-value">${Number(analysis.estimated_raw_like_percent || 0).toFixed(1)}%</span></div>
+                    <div>{{ t.skipped_by_threshold or 'Skipped by threshold' }}<span class="analysis-value">${Number(analysis.skipped_by_threshold_percent || 0).toFixed(1)}%</span></div>
+                    <div>{{ t.threshold or 'Threshold' }}<span class="analysis-value">${escapeHtml(analysis.threshold || '')}</span></div>
+                </div>
+                ${largestHtml}
+            `;
+            panel.classList.add('open');
+        }
+
+        function setAnalysisMessage(panel, message) {
+            if (!panel) {
+                return;
+            }
+            panel.textContent = message;
+            panel.classList.add('open');
+        }
+
+        function renderAnalysisProgress(panel, progress, jobId = '') {
+            if (!panel) {
+                return;
+            }
+            const percent = Number(progress.percent || 0);
+            const memory = progress.memory_mb == null ? '' : ` · {{ t.memory or 'Memory' }} ${Number(progress.memory_mb || 0).toFixed(1)} MB`;
+            const cancelButton = jobId ? `<button type="button" class="selection-button" onclick="cancelJob('/input-size-analysis/cancel', '${escapeHtml(jobId)}')">{{ t.cancel or 'Cancel' }}</button>` : '';
+            panel.innerHTML = `
+                <div class="extract-job-header">
+                    <strong>${escapeHtml(progress.phase || 'Analyzing')}</strong>
+                    <span>${percent.toFixed(1)}%</span>
+                </div>
+                <div class="extract-progress-track" aria-label="Analysis progress">
+                    <div class="extract-progress-fill" style="width: ${Math.max(0, Math.min(100, percent))}%"></div>
+                </div>
+                <div class="extract-job-meta">
+                    <span>${progress.current || 0}/${progress.total || 0}</span>
+                    <span>{{ t.elapsed or 'Elapsed' }} ${progress.elapsed || '00:00'}</span>
+                    <span>{{ t.eta or 'ETA' }} ${progress.eta || '--:--'}${memory}</span>
+                    <span>${escapeHtml(progress.message || '')}</span>
+                    ${cancelButton}
+                </div>
+            `;
+            panel.classList.add('open');
+        }
+
+        function pollAnalysisJob(jobId, panel, button) {
+            fetch(`/input-size-analysis/jobs/${jobId}`)
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok || !data.success) {
+                        throw new Error(data.message || 'Analysis failed.');
+                    }
+                    const job = data.job || {};
+                    const progress = job.progress || {};
+                    if (job.status === 'done') {
+                        renderAnalysis(panel, job.result || {});
+                        if (button) {
+                            button.disabled = false;
+                            button.textContent = '{{ t.analyze_input or "Analyze Input" }}';
+                        }
+                        return;
+                    }
+                    if (job.status === 'cancelled') {
+                        setAnalysisMessage(panel, progress.message || '{{ t.cancelled or "Cancelled" }}');
+                        if (button) {
+                            button.disabled = false;
+                            button.textContent = '{{ t.analyze_input or "Analyze Input" }}';
+                        }
+                        return;
+                    }
+                    if (job.status === 'error') {
+                        throw new Error(job.error || progress.message || 'Analysis failed.');
+                    }
+                    renderAnalysisProgress(panel, progress, jobId);
+                    window.setTimeout(() => pollAnalysisJob(jobId, panel, button), 500);
+                })
+                .catch(error => {
+                    setAnalysisMessage(panel, error.message || 'Analysis failed.');
+                    if (button) {
+                        button.disabled = false;
+                        button.textContent = '{{ t.analyze_input or "Analyze Input" }}';
+                    }
+                });
+        }
+
+        function analyzeInput(form, panel, button) {
+            if (!form) {
+                return;
+            }
+            const formData = new FormData();
+            const inputRoot = form.querySelector('input[name="input_root"]');
+            const maxFileMb = form.querySelector('input[name="max_file_mb"]');
+            formData.append('input_root', inputRoot ? inputRoot.value : '');
+            formData.append('max_file_mb', maxFileMb ? maxFileMb.value : '');
+            if (button) {
+                button.disabled = true;
+                button.textContent = '{{ t.analyzing or "Analyzing..." }}';
+            }
+            setAnalysisMessage(panel, '{{ t.analyzing or "Analyzing..." }}');
+            fetch('/input-size-analysis/start', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json().then(data => ({ ok: response.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok || !data.success) {
+                    throw new Error(data.message || 'Analysis failed.');
+                }
+                renderAnalysisProgress(panel, { phase: 'Queued', percent: 0, current: 0, total: 0, message: 'Queued' }, data.job_id);
+                pollAnalysisJob(data.job_id, panel, button);
+            })
+            .catch(error => {
+                setAnalysisMessage(panel, error.message || 'Analysis failed.');
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = '{{ t.analyze_input or "Analyze Input" }}';
+                }
+            });
         }
 
         function refreshAfterCompletedProcessJobs(jobs) {
@@ -1395,6 +1830,26 @@
             params.set('lang', '{{ lang }}');
             pendingProcessRefreshUrl = `/?${params.toString()}`;
             if (!processModal || !processModal.classList.contains('open')) {
+                window.location.href = pendingProcessRefreshUrl;
+            }
+        }
+
+        function refreshAfterCompletedExtractProcessJobs(jobs) {
+            const completedJob = jobs.find((job) => (
+                job.status === 'done'
+                && extractProcessRefreshJobIds.has(job.id)
+                && !processHandledJobIds.has(job.id)
+            ));
+            if (!completedJob) {
+                return;
+            }
+            processHandledJobIds.add(completedJob.id);
+            const targetDb = completedJob.db_name || (completedJob.result || {}).db_name || '{{ db_name }}';
+            const params = new URLSearchParams(window.location.search);
+            params.set('db', targetDb);
+            params.set('lang', '{{ lang }}');
+            pendingProcessRefreshUrl = `/?${params.toString()}`;
+            if (!extractProcessModal || !extractProcessModal.classList.contains('open')) {
                 window.location.href = pendingProcessRefreshUrl;
             }
         }
@@ -1430,6 +1885,22 @@
                 .catch(() => {});
         }
 
+        function pollExtractProcessJobs() {
+            fetch('/extract-and-process/jobs')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const jobs = data.jobs || [];
+                        renderExtractProcessJobs(jobs);
+                        refreshAfterCompletedExtractProcessJobs(jobs);
+                        if (!hasActiveJobs(jobs)) {
+                            stopExtractProcessPolling();
+                        }
+                    }
+                })
+                .catch(() => {});
+        }
+
         function startProcessPolling() {
             if (!processPollTimer) {
                 processPollTimer = window.setInterval(pollProcessJobs, 1000);
@@ -1456,12 +1927,29 @@
             }
         }
 
+        function startExtractProcessPolling() {
+            if (!extractProcessPollTimer) {
+                extractProcessPollTimer = window.setInterval(pollExtractProcessJobs, 1000);
+            }
+        }
+
+        function stopExtractProcessPolling() {
+            if (extractProcessPollTimer) {
+                window.clearInterval(extractProcessPollTimer);
+                extractProcessPollTimer = null;
+            }
+        }
+
         if (extractModalClose) {
             extractModalClose.addEventListener('click', closeExtractModal);
         }
 
         if (processModalClose) {
             processModalClose.addEventListener('click', closeProcessModal);
+        }
+
+        if (extractProcessModalClose) {
+            extractProcessModalClose.addEventListener('click', closeExtractProcessModal);
         }
 
         if (extractModal) {
@@ -1476,6 +1964,14 @@
             processModal.addEventListener('click', (event) => {
                 if (event.target === processModal) {
                     closeProcessModal();
+                }
+            });
+        }
+
+        if (extractProcessModal) {
+            extractProcessModal.addEventListener('click', (event) => {
+                if (event.target === extractProcessModal) {
+                    closeExtractProcessModal();
                 }
             });
         }
@@ -1521,6 +2017,18 @@
                     if (subdirs) {
                         subdirs.checked = true;
                     }
+                    const partialRead = processForm.querySelector('input[name="partial_read_oversized"]');
+                    if (partialRead) {
+                        partialRead.checked = true;
+                    }
+                    const maxFileMb = processForm.querySelector('input[name="max_file_mb"]');
+                    if (maxFileMb) {
+                        maxFileMb.value = '{{ default_max_file_mb }}';
+                    }
+                    const partialReadMb = processForm.querySelector('input[name="partial_read_mb"]');
+                    if (partialReadMb) {
+                        partialReadMb.value = '{{ default_partial_read_mb }}';
+                    }
                     pollProcessJobs();
                 })
                 .catch(error => {
@@ -1532,6 +2040,89 @@
                         processSubmit.textContent = '{{ t.start_processing or "Start Processing" }}';
                     }
                 });
+            });
+        }
+
+        if (processAnalyze) {
+            processAnalyze.addEventListener('click', () => {
+                analyzeInput(processForm, processAnalysis, processAnalyze);
+            });
+        }
+
+        if (extractProcessForm) {
+            extractProcessDbModeInputs.forEach(input => {
+                input.addEventListener('change', updateExtractProcessDbMode);
+            });
+            updateExtractProcessDbMode();
+
+            extractProcessForm.addEventListener('submit', (event) => {
+                event.preventDefault();
+                const formData = new FormData(extractProcessForm);
+                const selectedMode = (extractProcessDbModeInputs.find(input => input.checked) || {}).value || 'existing';
+                if (selectedMode === 'existing') {
+                    formData.delete('new_db_name');
+                }
+                if (extractProcessSubmit) {
+                    extractProcessSubmit.disabled = true;
+                    extractProcessSubmit.textContent = '{{ t.starting or "Starting..." }}';
+                }
+                fetch('/extract-and-process/start', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok || !data.success) {
+                        throw new Error(data.message || 'Failed to start extract and process.');
+                    }
+                    extractProcessRefreshJobIds.add(data.job_id);
+                    startExtractProcessPolling();
+                    extractProcessForm.reset();
+                    const targetDb = document.getElementById('extract-process-target-db');
+                    if (targetDb) {
+                        targetDb.value = '{{ db_name }}';
+                    }
+                    extractProcessDbModeInputs.forEach(input => {
+                        input.checked = input.value === 'existing';
+                    });
+                    updateExtractProcessDbMode();
+                    const subdirs = extractProcessForm.querySelector('input[name="process_subdirs"]');
+                    if (subdirs) {
+                        subdirs.checked = true;
+                    }
+                    const partialRead = extractProcessForm.querySelector('input[name="partial_read_oversized"]');
+                    if (partialRead) {
+                        partialRead.checked = true;
+                    }
+                    const maxFileMb = extractProcessForm.querySelector('input[name="max_file_mb"]');
+                    if (maxFileMb) {
+                        maxFileMb.value = '{{ default_max_file_mb }}';
+                    }
+                    const partialReadMb = extractProcessForm.querySelector('input[name="partial_read_mb"]');
+                    if (partialReadMb) {
+                        partialReadMb.value = '{{ default_partial_read_mb }}';
+                    }
+                    const outputRoot = extractProcessForm.querySelector('input[name="output_root"]');
+                    if (outputRoot) {
+                        outputRoot.value = '{{ one_per_series_output_dir }}';
+                    }
+                    pollExtractProcessJobs();
+                })
+                .catch(error => {
+                    alert(error.message || 'Failed to start extract and process.');
+                })
+                .finally(() => {
+                    if (extractProcessSubmit) {
+                        extractProcessSubmit.disabled = false;
+                        extractProcessSubmit.textContent = '{{ t.start_extract_and_process or "Start Extract and Process" }}';
+                    }
+                });
+            });
+        }
+
+        if (extractProcessAnalyze) {
+            extractProcessAnalyze.addEventListener('click', () => {
+                analyzeInput(extractProcessForm, extractProcessAnalysis, extractProcessAnalyze);
             });
         }
 
@@ -1565,6 +2156,12 @@
                         extractSubmit.textContent = '{{ t.start_extraction or "Start Extraction" }}';
                     }
                 });
+            });
+        }
+
+        if (extractAnalyze) {
+            extractAnalyze.addEventListener('click', () => {
+                analyzeInput(extractForm, extractAnalysis, extractAnalyze);
             });
         }
 

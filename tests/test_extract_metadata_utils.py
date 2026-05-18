@@ -164,6 +164,28 @@ class ExtractMetadataUtilsTests(unittest.TestCase):
         self.assertIsNotNone(meta)
         self.assertEqual(meta.number_of_slices, 123)
 
+    def test_extract_metadata_uses_partial_read_for_oversized_file(self):
+        ds = Dataset()
+        ds.PatientID = "P1"
+        ds.StudyInstanceUID = TEST_STUDY_UID
+        ds.SeriesInstanceUID = TEST_SERIES_UID
+        ds.SOPInstanceUID = TEST_SOP_UID
+
+        with TemporaryDirectory() as td:
+            dcm_path = Path(td) / "large.dcm"
+            dcm_path.write_bytes(b"\x00" * 128 + b"DICM" + b"x" * 100)
+            with patch.object(extract_metadata.pydicom, "dcmread", return_value=ds) as dcmread:
+                meta = extract_metadata.extract_metadata(
+                    dcm_path,
+                    max_full_file_bytes=10,
+                    partial_read_oversized=True,
+                    partial_read_limit_bytes=32,
+                )
+
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta.patient_id, "P1")
+        self.assertNotEqual(dcmread.call_args.args[0], dcm_path)
+
 
 if __name__ == "__main__":
     unittest.main()

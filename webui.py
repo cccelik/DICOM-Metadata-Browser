@@ -36,6 +36,13 @@ from flask import (
 )
 
 from dicom_browser.dashboard_service import build_dashboard_payload as build_dashboard_payload_service
+from dicom_browser.dicom_discovery import (
+    DEFAULT_MAX_FILE_BYTES,
+    analyze_7z_size,
+    analyze_input_size,
+    analyze_zip_size,
+    max_file_mb_to_bytes,
+)
 from dicom_browser.export_utils import (
     _generate_anonymized_value as generate_anonymized_value_impl,
     anonymize_export_value as anonymize_export_value_impl,
@@ -69,6 +76,8 @@ from dicom_browser.qa_utils import (
 from dicom_browser.store_metadata import init_database
 from dicom_browser.study_service import build_study_detail_payload as build_study_detail_payload_service
 from dicom_browser.translations import get_translation
+from dicom_browser.extract_metadata import DEFAULT_PARTIAL_READ_BYTES
+from dicom_browser.progress import format_duration
 from extract_one_per_series import extract_one_per_series
 
 app = Flask(__name__)
@@ -80,11 +89,28 @@ ONE_PER_SERIES_OUTPUT_DIR = BASE_DIR / "OnePerSeriesSamples"
 DEFAULT_DB_NAME = "dicom_metadata.db"
 DEFAULT_DB = str(DATABANK_DIR / DEFAULT_DB_NAME)
 ONE_PER_SERIES_OUTPUT_DISPLAY = ONE_PER_SERIES_OUTPUT_DIR.name
+SUPPORTED_INPUT_ARCHIVE_SUFFIXES = {".zip", ".7z"}
+SUPPORTED_EXTRACT_ARCHIVE_SUFFIXES = {".zip", ".7z"}
+DEFAULT_MAX_FILE_MB = DEFAULT_MAX_FILE_BYTES / (1024 * 1024)
+DEFAULT_PARTIAL_READ_MB = DEFAULT_PARTIAL_READ_BYTES / (1024 * 1024)
 
 EXTRACT_JOBS: Dict[str, dict] = {}
 EXTRACT_JOBS_LOCK = threading.Lock()
 PROCESS_JOBS: Dict[str, dict] = {}
 PROCESS_JOBS_LOCK = threading.Lock()
+EXTRACT_PROCESS_JOBS: Dict[str, dict] = {}
+EXTRACT_PROCESS_JOBS_LOCK = threading.Lock()
+ANALYSIS_JOBS: Dict[str, dict] = {}
+ANALYSIS_JOBS_LOCK = threading.Lock()
+
+
+class JobCancelled(Exception):
+    pass
+
+
+def _job_cancel_requested(jobs: Dict[str, dict], lock: threading.Lock, job_id: str) -> bool:
+    with lock:
+        return bool(jobs.get(job_id, {}).get("cancel_requested"))
 
 EXPORT_SECTIONS = [
     {
@@ -330,6 +356,40 @@ def resolve_extract_output_path(output_root: str) -> Path:
     if not output_path.is_absolute():
         output_path = BASE_DIR / output_path
     return output_path.resolve()
+
+
+def is_supported_process_input(path: Path) -> bool:
+    return path.is_dir() or path.suffix.lower() in SUPPORTED_INPUT_ARCHIVE_SUFFIXES
+
+
+def is_supported_extract_input(path: Path) -> bool:
+    return path.is_dir() or path.suffix.lower() in SUPPORTED_EXTRACT_ARCHIVE_SUFFIXES
+
+
+def parse_max_file_bytes(raw_value: Optional[str]) -> Optional[int]:
+    value = (raw_value or "").strip()
+    if not value:
+        return DEFAULT_MAX_FILE_BYTES
+    try:
+        mb_value = float(value)
+    except ValueError as exc:
+        raise ValueError("Max file size must be a number.") from exc
+    if mb_value < 0:
+        raise ValueError("Max file size must be zero or greater.")
+    return max_file_mb_to_bytes(mb_value)
+
+
+def parse_positive_mb(raw_value: Optional[str], default_bytes: int, field_label: str) -> int:
+    value = (raw_value or "").strip()
+    if not value:
+        return default_bytes
+    try:
+        mb_value = float(value)
+    except ValueError as exc:
+        raise ValueError(f"{field_label} must be a number.") from exc
+    if mb_value <= 0:
+        raise ValueError(f"{field_label} must be greater than zero.")
+    return max_file_mb_to_bytes(mb_value) or default_bytes
 
 
 def normalize_db_name(db_value: Optional[str]) -> str:
@@ -587,14 +647,91 @@ def _set_process_job(job_id: str, updates: dict) -> None:
         job["updated_at"] = time.time()
 
 
-def _run_extract_job(job_id: str, input_root: str, output_root: str) -> None:
+def _set_extract_process_job(job_id: str, updates: dict) -> None:
+    with EXTRACT_PROCESS_JOBS_LOCK:
+        job = EXTRACT_PROCESS_JOBS.setdefault(job_id, {})
+        job.update(updates)
+        job["updated_at"] = time.time()
+
+
+def _set_analysis_job(job_id: str, updates: dict) -> None:
+    with ANALYSIS_JOBS_LOCK:
+        job = ANALYSIS_JOBS.setdefault(job_id, {})
+        job.update(updates)
+        job["updated_at"] = time.time()
+
+
+def _combined_progress_payload(payload: dict, stage: str, offset: float, scale: float, message_prefix: str = "") -> dict:
+    combined = dict(payload)
+    stage_percent = float(combined.get("percent") or 0.0)
+    combined["percent"] = min(100.0, max(0.0, offset + (stage_percent * scale)))
+    combined["phase"] = stage
+    if message_prefix:
+        message = combined.get("message") or ""
+        combined["message"] = f"{message_prefix}: {message}" if message else message_prefix
+    combined["done"] = False
+    return combined
+
+
+def _finish_combined_progress(
+    total_elapsed_s: float,
+    extract_elapsed_s: float,
+    process_elapsed_s: float,
+    message: str,
+) -> dict:
+    return {
+        "phase": "Complete",
+        "current": 100,
+        "total": 100,
+        "percent": 100.0,
+        "elapsed_s": total_elapsed_s,
+        "elapsed": format_duration(total_elapsed_s),
+        "eta_s": 0,
+        "eta": "00:00",
+        "memory_mb": 0,
+        "message": message,
+        "done": True,
+        "error": None,
+        "extract_elapsed_s": extract_elapsed_s,
+        "extract_elapsed": format_duration(extract_elapsed_s),
+        "process_elapsed_s": process_elapsed_s,
+        "process_elapsed": format_duration(process_elapsed_s),
+        "total_elapsed_s": total_elapsed_s,
+        "total_elapsed": format_duration(total_elapsed_s),
+    }
+
+
+def _cancel_progress(message: str = "Cancelled") -> dict:
+    return {
+        "phase": "Cancelled",
+        "current": 0,
+        "total": 0,
+        "percent": 0.0,
+        "elapsed": "--:--",
+        "eta": "--:--",
+        "memory_mb": 0,
+        "message": message,
+        "done": True,
+        "error": None,
+    }
+
+
+def _run_extract_job(
+    job_id: str,
+    input_root: str,
+    output_root: str,
+    max_file_bytes: Optional[int],
+) -> None:
     def progress_callback(payload: dict) -> None:
+        if _job_cancel_requested(EXTRACT_JOBS, EXTRACT_JOBS_LOCK, job_id):
+            raise JobCancelled()
         _set_extract_job(job_id, {"progress": payload, "status": "running"})
 
     try:
         result = extract_one_per_series(
             Path(input_root),
             Path(output_root),
+            max_file_bytes=max_file_bytes,
             progress_callback=progress_callback,
         )
         with EXTRACT_JOBS_LOCK:
@@ -620,6 +757,8 @@ def _run_extract_job(job_id: str, input_root: str, output_root: str) -> None:
                 "progress": final_progress,
             },
         )
+    except JobCancelled:
+        _set_extract_job(job_id, {"status": "cancelled", "progress": _cancel_progress()})
     except Exception as exc:
         _set_extract_job(
             job_id,
@@ -650,8 +789,13 @@ def _run_process_job(
     process_subdirs: bool,
     skip_existing_paths: bool,
     max_workers: Optional[int],
+    max_file_bytes: Optional[int],
+    partial_read_oversized: bool,
+    partial_read_limit_bytes: int,
 ) -> None:
     def progress_callback(payload: dict) -> None:
+        if _job_cancel_requested(PROCESS_JOBS, PROCESS_JOBS_LOCK, job_id):
+            raise JobCancelled()
         _set_process_job(job_id, {"progress": payload, "status": "running"})
 
     try:
@@ -663,6 +807,9 @@ def _run_process_job(
             verbose=False,
             skip_existing_paths=skip_existing_paths,
             auto_workers=max_workers is None,
+            max_file_bytes=max_file_bytes,
+            partial_read_oversized=partial_read_oversized,
+            partial_read_limit_bytes=partial_read_limit_bytes,
             progress_callback=progress_callback,
         )
         with PROCESS_JOBS_LOCK:
@@ -686,8 +833,209 @@ def _run_process_job(
                 "progress": final_progress,
             },
         )
+    except JobCancelled:
+        _set_process_job(job_id, {"status": "cancelled", "progress": _cancel_progress()})
     except Exception as exc:
         _set_process_job(
+            job_id,
+            {
+                "status": "error",
+                "error": str(exc),
+                "progress": {
+                    "phase": "Error",
+                    "current": 0,
+                    "total": 0,
+                    "percent": 0.0,
+                    "elapsed": "--:--",
+                    "eta": "--:--",
+                    "memory_mb": 0,
+                    "message": str(exc),
+                    "done": True,
+                    "error": str(exc),
+                },
+            },
+        )
+
+
+def _run_extract_process_job(
+    job_id: str,
+    input_root: str,
+    output_root: str,
+    db_path: str,
+    db_name: str,
+    process_subdirs: bool,
+    skip_existing_paths: bool,
+    max_workers: Optional[int],
+    max_file_bytes: Optional[int],
+    partial_read_oversized: bool,
+    partial_read_limit_bytes: int,
+) -> None:
+    start_time = time.perf_counter()
+    extract_elapsed_s = 0.0
+    process_elapsed_s = 0.0
+
+    def extract_progress_callback(payload: dict) -> None:
+        if _job_cancel_requested(EXTRACT_PROCESS_JOBS, EXTRACT_PROCESS_JOBS_LOCK, job_id):
+            raise JobCancelled()
+        _set_extract_process_job(
+            job_id,
+            {
+                "status": "running",
+                "progress": _combined_progress_payload(payload, "Extracting", 0.0, 0.5),
+            },
+        )
+
+    def process_progress_callback(payload: dict) -> None:
+        if _job_cancel_requested(EXTRACT_PROCESS_JOBS, EXTRACT_PROCESS_JOBS_LOCK, job_id):
+            raise JobCancelled()
+        _set_extract_process_job(
+            job_id,
+            {
+                "status": "running",
+                "progress": _combined_progress_payload(payload, "Processing", 50.0, 0.5),
+            },
+        )
+
+    try:
+        extract_start = time.perf_counter()
+        extract_result = extract_one_per_series(
+            Path(input_root),
+            Path(output_root),
+            max_file_bytes=max_file_bytes,
+            progress_callback=extract_progress_callback,
+        )
+        extract_elapsed_s = time.perf_counter() - extract_start
+        if extract_result.get("copied", 0) == 0:
+            total_elapsed_s = time.perf_counter() - start_time
+            final_progress = _finish_combined_progress(
+                total_elapsed_s,
+                extract_elapsed_s,
+                0.0,
+                "No sampled DICOM files were extracted; processing skipped",
+            )
+            _set_extract_process_job(
+                job_id,
+                {
+                    "status": "done",
+                    "result": {
+                        "db_name": db_name,
+                        "db_path": db_path,
+                        "input_root": input_root,
+                        "output_root": output_root,
+                        "extract": extract_result,
+                        "processed": False,
+                    },
+                    "progress": final_progress,
+                },
+            )
+            return
+
+        process_start = time.perf_counter()
+        process_directory(
+            output_root,
+            db_path=db_path,
+            process_subdirs=process_subdirs,
+            max_workers=max_workers,
+            verbose=False,
+            skip_existing_paths=skip_existing_paths,
+            auto_workers=max_workers is None,
+            max_file_bytes=max_file_bytes,
+            partial_read_oversized=partial_read_oversized,
+            partial_read_limit_bytes=partial_read_limit_bytes,
+            print_elapsed_summary=False,
+            progress_callback=process_progress_callback,
+        )
+        process_elapsed_s = time.perf_counter() - process_start
+        total_elapsed_s = time.perf_counter() - start_time
+        final_progress = _finish_combined_progress(
+            total_elapsed_s,
+            extract_elapsed_s,
+            process_elapsed_s,
+            f"Extracted {extract_result['copied']} samples and processed into {db_name}",
+        )
+        _set_extract_process_job(
+            job_id,
+            {
+                "status": "done",
+                "result": {
+                    "db_name": db_name,
+                    "db_path": db_path,
+                    "input_root": input_root,
+                    "output_root": output_root,
+                    "extract": extract_result,
+                    "processed": True,
+                },
+                "progress": final_progress,
+            },
+        )
+    except JobCancelled:
+        _set_extract_process_job(job_id, {"status": "cancelled", "progress": _cancel_progress()})
+    except Exception as exc:
+        _set_extract_process_job(
+            job_id,
+            {
+                "status": "error",
+                "error": str(exc),
+                "progress": {
+                    "phase": "Error",
+                    "current": 0,
+                    "total": 100,
+                    "percent": 0.0,
+                    "elapsed": format_duration(time.perf_counter() - start_time),
+                    "eta": "--:--",
+                    "memory_mb": 0,
+                    "message": str(exc),
+                    "done": True,
+                    "error": str(exc),
+                    "extract_elapsed": format_duration(extract_elapsed_s),
+                    "process_elapsed": format_duration(process_elapsed_s),
+                    "total_elapsed": format_duration(time.perf_counter() - start_time),
+                },
+            },
+        )
+
+
+def _run_analysis_job(job_id: str, input_root: str, max_file_bytes: Optional[int]) -> None:
+    def progress_callback(payload: dict) -> None:
+        if _job_cancel_requested(ANALYSIS_JOBS, ANALYSIS_JOBS_LOCK, job_id):
+            raise JobCancelled()
+        _set_analysis_job(job_id, {"status": "running", "progress": payload})
+
+    try:
+        input_path = Path(input_root)
+        if input_path.is_file() and input_path.suffix.lower() == ".zip":
+            analysis = analyze_zip_size(input_path, max_file_bytes=max_file_bytes, progress_callback=progress_callback)
+        elif input_path.is_file() and input_path.suffix.lower() == ".7z":
+            analysis = analyze_7z_size(input_path, max_file_bytes=max_file_bytes, progress_callback=progress_callback)
+        else:
+            analysis = analyze_input_size(input_path, recursive=True, max_file_bytes=max_file_bytes, progress_callback=progress_callback)
+        if not analysis.get("exists"):
+            raise ValueError(str(analysis.get("message", "Input path does not exist.")))
+        with ANALYSIS_JOBS_LOCK:
+            final_progress = dict(ANALYSIS_JOBS.get(job_id, {}).get("progress", {}))
+        final_progress.update(
+            {
+                "phase": "Complete",
+                "percent": 100.0,
+                "eta_s": 0,
+                "eta": "00:00",
+                "message": "Analysis complete",
+                "done": True,
+                "error": None,
+            }
+        )
+        _set_analysis_job(
+            job_id,
+            {
+                "status": "done",
+                "result": analysis,
+                "progress": final_progress,
+            },
+        )
+    except JobCancelled:
+        _set_analysis_job(job_id, {"status": "cancelled", "progress": _cancel_progress()})
+    except Exception as exc:
+        _set_analysis_job(
             job_id,
             {
                 "status": "error",
@@ -714,11 +1062,17 @@ def start_extract_one_per_series():
     output_root = (request.form.get("output_root") or "").strip() or ONE_PER_SERIES_OUTPUT_DISPLAY
     if not input_root:
         return jsonify({"success": False, "message": "Input path is required."}), 400
+    try:
+        max_file_bytes = parse_max_file_bytes(request.form.get("max_file_mb"))
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
 
     input_path = Path(input_root).expanduser().resolve()
     output_path = resolve_extract_output_path(output_root)
-    if not input_path.is_dir():
-        return jsonify({"success": False, "message": "Input path is not a directory."}), 400
+    if not input_path.exists():
+        return jsonify({"success": False, "message": "Input path does not exist."}), 400
+    if not is_supported_extract_input(input_path):
+        return jsonify({"success": False, "message": "Input path must be a directory or ZIP archive."}), 400
     if input_path == output_path:
         return jsonify({"success": False, "message": "Output path must differ from input path."}), 400
     output_path.mkdir(parents=True, exist_ok=True)
@@ -730,6 +1084,7 @@ def start_extract_one_per_series():
             "status": "queued",
             "input_root": str(input_path),
             "output_root": str(output_path),
+            "max_file_bytes": max_file_bytes,
             "created_at": time.time(),
             "updated_at": time.time(),
             "progress": {
@@ -748,7 +1103,7 @@ def start_extract_one_per_series():
 
     thread = threading.Thread(
         target=_run_extract_job,
-        args=(job_id, str(input_path), str(output_path)),
+        args=(job_id, str(input_path), str(output_path), max_file_bytes),
         daemon=True,
     )
     thread.start()
@@ -760,10 +1115,22 @@ def start_process_dicom():
     input_root = (request.form.get("input_root") or "").strip()
     if not input_root:
         return jsonify({"success": False, "message": "Input path is required."}), 400
+    try:
+        max_file_bytes = parse_max_file_bytes(request.form.get("max_file_mb"))
+        partial_read_limit_bytes = parse_positive_mb(
+            request.form.get("partial_read_mb"),
+            DEFAULT_PARTIAL_READ_BYTES,
+            "Partial read size",
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    partial_read_oversized = "on" in request.form.getlist("partial_read_oversized")
 
     input_path = Path(input_root).expanduser().resolve()
     if not input_path.exists():
         return jsonify({"success": False, "message": "Input path does not exist."}), 400
+    if not is_supported_process_input(input_path):
+        return jsonify({"success": False, "message": "Input path must be a directory, ZIP archive, or 7Z archive."}), 400
 
     new_db_name = (request.form.get("new_db_name") or "").strip()
     db_name = normalize_db_name(new_db_name or request.form.get("db") or DEFAULT_DB_NAME)
@@ -788,6 +1155,9 @@ def start_process_dicom():
             "input_root": str(input_path),
             "db_name": db_name,
             "db_path": db_path,
+            "max_file_bytes": max_file_bytes,
+            "partial_read_oversized": partial_read_oversized,
+            "partial_read_limit_bytes": partial_read_limit_bytes,
             "created_at": time.time(),
             "updated_at": time.time(),
             "progress": {
@@ -814,6 +1184,100 @@ def start_process_dicom():
             process_subdirs,
             skip_existing_paths,
             max_workers,
+            max_file_bytes,
+            partial_read_oversized,
+            partial_read_limit_bytes,
+        ),
+        daemon=True,
+    )
+    thread.start()
+    return jsonify({"success": True, "job_id": job_id})
+
+
+@app.route('/extract-and-process/start', methods=['POST'])
+def start_extract_and_process():
+    input_root = (request.form.get("input_root") or "").strip()
+    output_root = (request.form.get("output_root") or "").strip() or ONE_PER_SERIES_OUTPUT_DISPLAY
+    if not input_root:
+        return jsonify({"success": False, "message": "Input path is required."}), 400
+    try:
+        max_file_bytes = parse_max_file_bytes(request.form.get("max_file_mb"))
+        partial_read_limit_bytes = parse_positive_mb(
+            request.form.get("partial_read_mb"),
+            DEFAULT_PARTIAL_READ_BYTES,
+            "Partial read size",
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    partial_read_oversized = "on" in request.form.getlist("partial_read_oversized")
+
+    input_path = Path(input_root).expanduser().resolve()
+    output_path = resolve_extract_output_path(output_root)
+    if not input_path.exists():
+        return jsonify({"success": False, "message": "Input path does not exist."}), 400
+    if not is_supported_extract_input(input_path):
+        return jsonify({"success": False, "message": "Input path must be a directory or ZIP archive."}), 400
+    if input_path == output_path:
+        return jsonify({"success": False, "message": "Output path must differ from input path."}), 400
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    new_db_name = (request.form.get("new_db_name") or "").strip()
+    db_name = normalize_db_name(new_db_name or request.form.get("db") or DEFAULT_DB_NAME)
+    db_path = resolve_db_path(db_name)
+    process_subdirs = request.form.get("process_subdirs") == "on"
+    skip_existing_paths = request.form.get("skip_existing_paths") == "on"
+    max_workers_raw = (request.form.get("max_workers") or "").strip()
+    max_workers = None
+    if max_workers_raw:
+        try:
+            max_workers = int(max_workers_raw)
+        except ValueError:
+            return jsonify({"success": False, "message": "Max workers must be a number."}), 400
+        if max_workers < 1:
+            return jsonify({"success": False, "message": "Max workers must be greater than zero."}), 400
+
+    job_id = uuid.uuid4().hex
+    with EXTRACT_PROCESS_JOBS_LOCK:
+        EXTRACT_PROCESS_JOBS[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "input_root": str(input_path),
+            "output_root": str(output_path),
+            "db_name": db_name,
+            "db_path": db_path,
+            "max_file_bytes": max_file_bytes,
+            "partial_read_oversized": partial_read_oversized,
+            "partial_read_limit_bytes": partial_read_limit_bytes,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "progress": {
+                "phase": "Queued",
+                "current": 0,
+                "total": 100,
+                "percent": 0.0,
+                "elapsed": "00:00",
+                "eta": "--:--",
+                "memory_mb": 0,
+                "message": "Queued",
+                "done": False,
+                "error": None,
+            },
+        }
+
+    thread = threading.Thread(
+        target=_run_extract_process_job,
+        args=(
+            job_id,
+            str(input_path),
+            str(output_path),
+            db_path,
+            db_name,
+            process_subdirs,
+            skip_existing_paths,
+            max_workers,
+            max_file_bytes,
+            partial_read_oversized,
+            partial_read_limit_bytes,
         ),
         daemon=True,
     )
@@ -832,6 +1296,19 @@ def extract_one_per_series_jobs():
     return jsonify({"success": True, "jobs": jobs})
 
 
+@app.route('/extract-one-per-series/cancel/<job_id>', methods=['POST'])
+def cancel_extract_one_per_series_job(job_id: str):
+    with EXTRACT_JOBS_LOCK:
+        job = EXTRACT_JOBS.get(job_id)
+        if not job:
+            return jsonify({"success": False, "message": "Job not found."}), 404
+        if job.get("status") not in ("queued", "running"):
+            return jsonify({"success": False, "message": "Job is not running."}), 400
+        job["cancel_requested"] = True
+        job["updated_at"] = time.time()
+    return jsonify({"success": True})
+
+
 @app.route('/process-dicom/jobs')
 def process_dicom_jobs():
     with PROCESS_JOBS_LOCK:
@@ -843,18 +1320,160 @@ def process_dicom_jobs():
     return jsonify({"success": True, "jobs": jobs})
 
 
+@app.route('/process-dicom/cancel/<job_id>', methods=['POST'])
+def cancel_process_dicom_job(job_id: str):
+    with PROCESS_JOBS_LOCK:
+        job = PROCESS_JOBS.get(job_id)
+        if not job:
+            return jsonify({"success": False, "message": "Job not found."}), 404
+        if job.get("status") not in ("queued", "running"):
+            return jsonify({"success": False, "message": "Job is not running."}), 400
+        job["cancel_requested"] = True
+        job["updated_at"] = time.time()
+    return jsonify({"success": True})
+
+
+@app.route('/extract-and-process/jobs')
+def extract_and_process_jobs():
+    with EXTRACT_PROCESS_JOBS_LOCK:
+        jobs = sorted(
+            (dict(job) for job in EXTRACT_PROCESS_JOBS.values()),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        )
+    return jsonify({"success": True, "jobs": jobs})
+
+
+@app.route('/extract-and-process/cancel/<job_id>', methods=['POST'])
+def cancel_extract_and_process_job(job_id: str):
+    with EXTRACT_PROCESS_JOBS_LOCK:
+        job = EXTRACT_PROCESS_JOBS.get(job_id)
+        if not job:
+            return jsonify({"success": False, "message": "Job not found."}), 404
+        if job.get("status") not in ("queued", "running"):
+            return jsonify({"success": False, "message": "Job is not running."}), 400
+        job["cancel_requested"] = True
+        job["updated_at"] = time.time()
+    return jsonify({"success": True})
+
+
+@app.route('/input-size-analysis', methods=['POST'])
+def input_size_analysis():
+    input_root = (request.form.get("input_root") or "").strip()
+    if not input_root:
+        return jsonify({"success": False, "message": "Input path is required."}), 400
+    try:
+        max_file_bytes = parse_max_file_bytes(request.form.get("max_file_mb"))
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+
+    input_path = Path(input_root).expanduser().resolve()
+    if not input_path.exists():
+        return jsonify({"success": False, "message": "Input path does not exist."}), 400
+    if input_path.is_file() and input_path.suffix.lower() == ".zip":
+        analysis = analyze_zip_size(input_path, max_file_bytes=max_file_bytes)
+        if not analysis.get("exists"):
+            return jsonify({"success": False, "message": analysis.get("message", "Could not analyze ZIP archive.")}), 400
+        return jsonify({"success": True, "analysis": analysis})
+    if input_path.is_file() and input_path.suffix.lower() == ".7z":
+        analysis = analyze_7z_size(input_path, max_file_bytes=max_file_bytes)
+        if not analysis.get("exists"):
+            return jsonify({"success": False, "message": analysis.get("message", "Could not analyze 7Z archive.")}), 400
+        return jsonify({"success": True, "analysis": analysis})
+
+    analysis = analyze_input_size(input_path, recursive=True, max_file_bytes=max_file_bytes)
+    if not analysis.get("exists"):
+        return jsonify({"success": False, "message": analysis.get("message", "Input path does not exist.")}), 400
+    return jsonify({"success": True, "analysis": analysis})
+
+
+@app.route('/input-size-analysis/start', methods=['POST'])
+def start_input_size_analysis():
+    input_root = (request.form.get("input_root") or "").strip()
+    if not input_root:
+        return jsonify({"success": False, "message": "Input path is required."}), 400
+    try:
+        max_file_bytes = parse_max_file_bytes(request.form.get("max_file_mb"))
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+
+    input_path = Path(input_root).expanduser().resolve()
+    if not input_path.exists():
+        return jsonify({"success": False, "message": "Input path does not exist."}), 400
+    job_id = uuid.uuid4().hex
+    with ANALYSIS_JOBS_LOCK:
+        ANALYSIS_JOBS[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "input_root": str(input_path),
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "progress": {
+                "phase": "Queued",
+                "current": 0,
+                "total": 0,
+                "percent": 0.0,
+                "elapsed": "00:00",
+                "eta": "--:--",
+                "memory_mb": 0,
+                "message": "Queued",
+                "done": False,
+                "error": None,
+            },
+        }
+    thread = threading.Thread(
+        target=_run_analysis_job,
+        args=(job_id, str(input_path), max_file_bytes),
+        daemon=True,
+    )
+    thread.start()
+    return jsonify({"success": True, "job_id": job_id})
+
+
+@app.route('/input-size-analysis/jobs/<job_id>')
+def input_size_analysis_job(job_id: str):
+    with ANALYSIS_JOBS_LOCK:
+        job = ANALYSIS_JOBS.get(job_id)
+        if not job:
+            return jsonify({"success": False, "message": "Analysis job not found."}), 404
+        return jsonify({"success": True, "job": dict(job)})
+
+
+@app.route('/input-size-analysis/cancel/<job_id>', methods=['POST'])
+def cancel_input_size_analysis_job(job_id: str):
+    with ANALYSIS_JOBS_LOCK:
+        job = ANALYSIS_JOBS.get(job_id)
+        if not job:
+            return jsonify({"success": False, "message": "Analysis job not found."}), 404
+        if job.get("status") not in ("queued", "running"):
+            return jsonify({"success": False, "message": "Analysis job is not running."}), 400
+        job["cancel_requested"] = True
+        job["updated_at"] = time.time()
+    return jsonify({"success": True})
+
+
 @app.route('/filesystem/directories')
 def filesystem_directories():
     requested_path = (request.args.get("path") or "").strip()
+    include_archives = request.args.get("include_archives") == "1"
+    archive_mode = request.args.get("archive_mode") or "process"
+    archive_suffixes = (
+        SUPPORTED_EXTRACT_ARCHIVE_SUFFIXES
+        if archive_mode == "extract"
+        else SUPPORTED_INPUT_ARCHIVE_SUFFIXES
+    )
     if requested_path:
         current_path = Path(requested_path).expanduser().resolve()
     else:
         current_path = Path.home().resolve()
+    if current_path.is_file():
+        current_path = current_path.parent
 
     if not current_path.exists() or not current_path.is_dir():
         return jsonify({"success": False, "message": "Directory not found."}), 404
 
     directories = []
+    archives = []
     try:
         for child in current_path.iterdir():
             if child.name.startswith("."):
@@ -862,6 +1481,8 @@ def filesystem_directories():
             try:
                 if child.is_dir():
                     directories.append({"name": child.name, "path": str(child.resolve())})
+                elif include_archives and child.is_file() and child.suffix.lower() in archive_suffixes:
+                    archives.append({"name": child.name, "path": str(child.resolve())})
             except OSError:
                 continue
     except PermissionError:
@@ -870,6 +1491,7 @@ def filesystem_directories():
         return jsonify({"success": False, "message": str(exc)}), 400
 
     directories.sort(key=lambda item: item["name"].lower())
+    archives.sort(key=lambda item: item["name"].lower())
     parent = current_path.parent if current_path.parent != current_path else None
     return jsonify(
         {
@@ -878,6 +1500,7 @@ def filesystem_directories():
             "parent": str(parent) if parent else None,
             "home": str(Path.home().resolve()),
             "directories": directories,
+            "archives": archives,
         }
     )
 
@@ -1966,6 +2589,8 @@ def index():
     context["export_sections"], _ = build_export_sections(translations)
     context["export_modalities"] = []
     context["one_per_series_output_dir"] = ONE_PER_SERIES_OUTPUT_DISPLAY
+    context["default_max_file_mb"] = int(DEFAULT_MAX_FILE_MB)
+    context["default_partial_read_mb"] = int(DEFAULT_PARTIAL_READ_MB)
 
     if not os.path.exists(db_path):
         context["error"] = "Database not found"

@@ -1,7 +1,10 @@
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
+
+import py7zr
 
 from dicom_browser import dicom_discovery
 
@@ -57,6 +60,75 @@ class DicomDiscoveryTests(unittest.TestCase):
             self.assertEqual(len(recursive), 2)
             self.assertEqual(len(non_recursive), 1)
             self.assertEqual(len(limited), 1)
+
+    def test_collect_dicom_files_skips_oversized_candidates(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            small = base / "small.dcm"
+            large = base / "large.dcm"
+            small.write_bytes(b"x")
+            large.write_bytes(b"x" * 12)
+
+            files = dicom_discovery.collect_dicom_files(base, max_file_bytes=10)
+
+            self.assertEqual(files, [small])
+
+    def test_collect_dicom_files_can_include_oversized_candidates(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            large = base / "large.dcm"
+            large.write_bytes(b"x" * 12)
+
+            files = dicom_discovery.collect_dicom_files(
+                base,
+                max_file_bytes=10,
+                include_oversized=True,
+            )
+
+            self.assertEqual(files, [large])
+
+    def test_analyze_input_size_reports_oversized_dicom_like_bytes(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            (base / "small.dcm").write_bytes(b"x")
+            (base / "large.dcm").write_bytes(b"x" * 12)
+            (base / "note.txt").write_text("ignore")
+
+            analysis = dicom_discovery.analyze_input_size(base, max_file_bytes=10)
+
+            self.assertTrue(analysis["exists"])
+            self.assertEqual(analysis["candidate_files"], 1)
+            self.assertEqual(analysis["oversized_dicom_like_files"], 1)
+            self.assertEqual(analysis["oversized_dicom_like_bytes"], 12)
+            self.assertGreater(analysis["skipped_by_threshold_percent"], 0)
+
+    def test_analyze_zip_size_uses_member_sizes_without_extracting(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            archive_path = base / "input.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("small.dcm", b"x")
+                archive.writestr("large.dcm", b"x" * 12)
+
+            analysis = dicom_discovery.analyze_zip_size(archive_path, max_file_bytes=10)
+
+            self.assertTrue(analysis["exists"])
+            self.assertEqual(analysis["candidate_files"], 1)
+            self.assertEqual(analysis["oversized_dicom_like_files"], 1)
+
+    def test_analyze_7z_size_uses_member_sizes_without_extracting(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            archive_path = base / "input.7z"
+            with py7zr.SevenZipFile(archive_path, "w") as archive:
+                archive.writestr(b"x", "small.dcm")
+                archive.writestr(b"x" * 12, "large.dcm")
+
+            analysis = dicom_discovery.analyze_7z_size(archive_path, max_file_bytes=10)
+
+            self.assertTrue(analysis["exists"])
+            self.assertEqual(analysis["candidate_files"], 1)
+            self.assertEqual(analysis["oversized_dicom_like_files"], 1)
 
     def test_can_parse_as_dicom_handles_parser_errors(self):
         with tempfile.TemporaryDirectory() as td:

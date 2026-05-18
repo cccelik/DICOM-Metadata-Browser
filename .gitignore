@@ -2,7 +2,9 @@
 !.gitignore
 !process_dicom.py
 !webui.py
+!analyze_input.py
 !extract_one_per_series.py
+!extract_and_process.py
 !pyproject.toml
 !.flake8
 !requirements.txt

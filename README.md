@@ -8,6 +8,7 @@ Extract DICOM metadata into SQLite, explore it in a Flask web UI, and run QA-foc
 
 - Ingests DICOM files/folders/archives into SQLite (`dicom_metadata` + `private_tag` tables).
 - Detects DICOM candidates robustly (`.dcm`, `.ima`, Part 10 signature, extensionless parse fallback).
+- Protects network processing from very large raw-data files with configurable full-parse and header-only read limits.
 - Computes representative-series flags per study to avoid QA double-counting.
 - Exposes a web UI for filtering, dashboard analytics, study inspection, and CSV export.
 - Supports anonymized database export with path scrubbing and private-tag payload scrubbing.
@@ -50,6 +51,9 @@ Open `http://127.0.0.1:5001`.
 python3 process_dicom.py <input_path> [db_name_or_path]
   --no-subdirs           Treat input as one scan (no scan-folder discovery)
   --max-workers N        Set worker processes
+  --max-file-mb MB       Full-parse files up to this size; 0 disables the size limit
+  --partial-read-mb MB   Header-only read size for oversized DICOM-like files
+  --no-partial-oversized Disable header-only reads for oversized files
   --timing               Print stage/total timings
   --skip-existing-paths  Skip rows whose relative file path already exists
   --no-auto-workers      Disable worker auto-tuning
@@ -74,7 +78,42 @@ python3 process_dicom.py /path/to/archive.7z dicom_metadata.db
 
 # Single file (including extensionless vendor files)
 python3 process_dicom.py /path/to/file dicom_metadata.db
+
+# Network folder with huge raw-data files
+python3 process_dicom.py /path/to/dicom_dir dicom_metadata.db --max-file-mb 100 --partial-read-mb 25
 ```
+
+Large-file behavior:
+
+- Default full-parse limit: `100 MB`.
+- Default oversized header-only read limit: `25 MB`.
+- Oversized DICOM-like files are still considered candidates by default. The processor reads only the first `--partial-read-mb` MB to recover metadata without pulling the full raw payload over the network.
+- Use `--no-partial-oversized` to disable that fallback and skip oversized candidates instead.
+- Use `--max-file-mb 0` to disable the full-parse size limit.
+
+### Analyze input size
+
+```bash
+python3 analyze_input.py /path/to/input_root
+python3 analyze_input.py /path/to/archive.zip --max-file-mb 100
+python3 analyze_input.py /path/to/archive.7z --max-file-mb 100
+python3 analyze_input.py /path/to/input_root --json
+```
+
+The analyzer reports total size, DICOM candidates, oversized DICOM-like data, estimated raw-like percentage, and the largest oversized files. It shows CLI progress while scanning; ZIP analysis reads the archive directory without extracting it.
+
+### Extract and process in one command
+
+```bash
+python3 extract_and_process.py /path/to/input_root dicom_metadata.db
+python3 extract_and_process.py /path/to/archive.zip dicom_metadata.db --output-root OnePerSeriesSamples/archive_samples
+python3 extract_and_process.py /path/to/archive.7z dicom_metadata.db --output-root OnePerSeriesSamples/archive_samples
+python3 extract_and_process.py /path/to/input_root dicom_metadata.db --max-file-mb 100 --partial-read-mb 25
+```
+
+This wrapper first runs one-per-series extraction, then processes the sampled output folder into the target databank. If `--output-root` is omitted, a unique folder is created under `OnePerSeriesSamples/`. The wrapper accepts the same large-file processing defaults as the main processor: full parse up to `100 MB`, oversized header-only read up to `25 MB`, and partial oversized reads enabled unless `--no-partial-oversized` is provided.
+
+The wrapper prints three timing lines: extract elapsed time, process elapsed time, and total wall-clock time for extraction plus processing.
 
 ### Metadata-only extraction (JSON)
 
@@ -87,7 +126,12 @@ python3 -m dicom_browser.extract_metadata /path/to/dicom_dir -o /tmp/metadata.js
 
 ```bash
 python3 extract_one_per_series.py /path/to/input_root /path/to/output_root
+python3 extract_one_per_series.py /path/to/archive.zip /path/to/output_root
+python3 extract_one_per_series.py /path/to/archive.7z /path/to/output_root
+python3 extract_one_per_series.py /path/to/input_root /path/to/output_root --max-file-mb 100
 ```
+
+The one-per-series helper copies complete files only. It supports folder, ZIP, and 7Z inputs, preserves the directory structure, and uses the same `100 MB` default candidate limit. Set `--max-file-mb 0` if complete oversized files must be copied.
 
 ## Web UI
 
@@ -105,6 +149,17 @@ Use query parameter (filename only):
 ```text
 http://127.0.0.1:5001/?db=another.db
 ```
+
+### Processing tools
+
+From the top-bar tools menu:
+
+- **Process DICOM** accepts folders, ZIP archives, and 7Z archives.
+- **Extract One Per Series** accepts folders, ZIP archives, and 7Z archives.
+- **Extract and Process** first creates one-per-series samples, then processes that sampled output into the selected databank.
+- Both tools expose `Max file size (MB)` with default `100`.
+- **Process DICOM** also exposes `Oversized header read (MB)` with default `25` and keeps **Try header-only read for oversized files** enabled by default.
+- Use **Analyze Input** before processing to estimate total size, DICOM candidates, oversized DICOM-like data, skipped-by-threshold percentage, and the largest oversized files. Analysis runs as a background job with a progress bar; ZIP analysis reads the archive directory without extracting it.
 
 ### Anonymized databank export
 
@@ -161,8 +216,10 @@ Config:
 ## Repository Structure
 
 - `webui.py`: Flask app and UI routes
+- `analyze_input.py`: input size/raw-like data analyzer with CLI progress
 - `process_dicom.py`: ingest pipeline and representative-series pruning
 - `extract_one_per_series.py`: one-file-per-series helper
+- `extract_and_process.py`: combined one-per-series extraction plus databank processing CLI
 - `dicom_browser/`: shared application package
 - `dicom_browser/extract_metadata.py`: DICOM parser and private-tag extraction
 - `dicom_browser/store_metadata.py`: SQLite schema and write path

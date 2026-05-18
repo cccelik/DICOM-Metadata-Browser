@@ -16,8 +16,14 @@ import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from dicom_browser.dicom_discovery import collect_dicom_files, is_dicom_candidate
-from dicom_browser.extract_metadata import extract_metadata_from_paths
+from dicom_browser.dicom_discovery import (
+    DEFAULT_MAX_FILE_BYTES,
+    collect_dicom_files,
+    format_bytes,
+    is_dicom_candidate,
+    max_file_mb_to_bytes,
+)
+from dicom_browser.extract_metadata import DEFAULT_PARTIAL_READ_BYTES, extract_metadata_from_paths
 from dicom_browser.progress import ProgressCallback, ProgressTracker, TerminalProgress
 from dicom_browser.qa_utils import (
     calculate_raw_injection_delay_minutes,
@@ -200,6 +206,9 @@ def _extract_and_store(
     insert_progress_callback: Optional[ProgressCallback] = None,
     parse_start_callback=None,
     insert_start_callback=None,
+    max_full_file_bytes: Optional[int] = DEFAULT_MAX_FILE_BYTES,
+    partial_read_oversized: bool = True,
+    partial_read_limit_bytes: int = DEFAULT_PARTIAL_READ_BYTES,
 ) -> Tuple[int, int, int, List[Tuple[Path, object]], Dict[str, float]]:
     timings: Dict[str, float] = {}
 
@@ -210,6 +219,9 @@ def _extract_and_store(
         dcm_files,
         max_workers=max_workers,
         progress_callback=lambda _path, _meta: progress_callback({}) if progress_callback else None,
+        max_full_file_bytes=max_full_file_bytes,
+        partial_read_oversized=partial_read_oversized,
+        partial_read_limit_bytes=partial_read_limit_bytes,
     )
     timings["extract_metadata_s"] = time.perf_counter() - t_extract
     skipped_invalid = len(dcm_files) - len(metadata_entries)
@@ -243,6 +255,9 @@ def process_single_scan(
     insert_progress_callback: Optional[ProgressCallback] = None,
     parse_start_callback=None,
     insert_start_callback=None,
+    max_file_bytes: Optional[int] = DEFAULT_MAX_FILE_BYTES,
+    partial_read_oversized: bool = True,
+    partial_read_limit_bytes: int = DEFAULT_PARTIAL_READ_BYTES,
 ) -> Tuple[int, int, int, List[str], Dict[str, float]]:
     """Process a single scan directory and store its metadata in the database."""
     from dicom_browser.store_metadata import study_exists
@@ -250,7 +265,12 @@ def process_single_scan(
     timings: Dict[str, float] = {}
     t0 = time.perf_counter()
 
-    dcm_files = collect_dicom_files(scan_dir, recursive=True)
+    dcm_files = collect_dicom_files(
+        scan_dir,
+        recursive=True,
+        max_file_bytes=max_file_bytes,
+        include_oversized=partial_read_oversized,
+    )
     dcm_files, skipped_existing = _filter_existing_paths(
         dcm_files,
         base_dir,
@@ -274,6 +294,9 @@ def process_single_scan(
         insert_progress_callback=insert_progress_callback,
         parse_start_callback=parse_start_callback,
         insert_start_callback=insert_start_callback,
+        max_full_file_bytes=max_file_bytes,
+        partial_read_oversized=partial_read_oversized,
+        partial_read_limit_bytes=partial_read_limit_bytes,
     )
     timings.update(extract_insert_timings)
 
@@ -305,6 +328,11 @@ def process_directory(
     auto_workers: bool = True,
     scan_root_label: Optional[str] = None,
     progress_callback: Optional[ProgressCallback] = None,
+    max_file_bytes: Optional[int] = DEFAULT_MAX_FILE_BYTES,
+    partial_read_oversized: bool = True,
+    partial_read_limit_bytes: int = DEFAULT_PARTIAL_READ_BYTES,
+    elapsed_start_time: Optional[float] = None,
+    print_elapsed_summary: bool = True,
 ):
     """Process all DICOM files in a directory, ZIP, or 7Z file and store metadata.
 
@@ -316,9 +344,14 @@ def process_directory(
         timing: Print timing information after processing
         skip_existing_paths: If True, skip files whose relative paths already exist in the database
         auto_workers: If True, benchmark a small sample to pick worker count
+        max_file_bytes: Maximum file size to consider; None disables the size filter
+        partial_read_oversized: If True, parse oversized DICOM-like files from a capped prefix
+        partial_read_limit_bytes: Prefix size for oversized partial reads
+        elapsed_start_time: Optional start timestamp for total elapsed reporting
+        print_elapsed_summary: If True, print the elapsed time summary at the end
     """
     dicom_path = Path(dicom_dir)
-    start_time = time.perf_counter()
+    start_time = elapsed_start_time if elapsed_start_time is not None else time.perf_counter()
 
     DATABANK_DIR.mkdir(parents=True, exist_ok=True)
     db_path_obj = Path(db_path)
@@ -331,7 +364,8 @@ def process_directory(
         if start_time is None:
             return
         elapsed = time.perf_counter() - start_time
-        print(f"Elapsed time: {elapsed:.2f}s")
+        if print_elapsed_summary:
+            print(f"Elapsed time: {elapsed:.2f}s")
         if timing and extra_timings:
             for label, seconds in extra_timings.items():
                 print(f"{label}: {seconds:.2f}s")
@@ -342,7 +376,13 @@ def process_directory(
             print(message)
 
     def _sample_dicom_files(sample_root: Path, limit: int = 200) -> List[Path]:
-        return collect_dicom_files(sample_root, recursive=True, limit=limit)
+        return collect_dicom_files(
+            sample_root,
+            recursive=True,
+            limit=limit,
+            max_file_bytes=max_file_bytes,
+            include_oversized=partial_read_oversized,
+        )
 
     def _auto_tune_workers(sample_paths: List[Path]) -> Optional[int]:
         if not sample_paths:
@@ -361,6 +401,9 @@ def process_directory(
             extract_metadata_from_paths(
                 sample_paths,
                 max_workers=workers,
+                max_full_file_bytes=max_file_bytes,
+                partial_read_oversized=partial_read_oversized,
+                partial_read_limit_bytes=partial_read_limit_bytes,
             )
             elapsed = time.perf_counter() - t0
             _vprint(f"   - {workers} workers: {elapsed:.2f}s")
@@ -375,6 +418,14 @@ def process_directory(
         return
 
     print(f"Starting processing: {dicom_path}")
+    if max_file_bytes:
+        if partial_read_oversized:
+            _vprint(
+                f"File size filter: full-parse up to {format_bytes(max_file_bytes)}; "
+                f"header-read oversized files up to {format_bytes(partial_read_limit_bytes)}"
+            )
+        else:
+            _vprint(f"File size filter: skipping files larger than {format_bytes(max_file_bytes)}")
 
     # Check if input is a ZIP or 7Z file
     temp_extract_dir = None
@@ -394,14 +445,43 @@ def process_directory(
                 if filename_lower.endswith('.zip'):
                     # Extract ZIP file
                     with zipfile.ZipFile(dicom_path, 'r') as zip_ref:
-                        zip_ref.extractall(extract_dir)
+                        members = zip_ref.infolist()
+                        archive_progress = None
+                        if progress_callback:
+                            archive_progress = ProgressTracker(
+                                total=max(len(members), 1),
+                                phase="Extracting archive",
+                                callback=progress_callback,
+                            )
+                            archive_progress.emit()
+                        for index, member in enumerate(members, start=1):
+                            member_path = (extract_dir / member.filename).resolve()
+                            if extract_dir.resolve() != member_path and extract_dir.resolve() not in member_path.parents:
+                                raise ValueError(f"Unsafe archive member path: {member.filename}")
+                            zip_ref.extract(member, extract_dir)
+                            if archive_progress:
+                                archive_progress.update(
+                                    index,
+                                    message=f"Extracted {index}/{len(members)} archive entries",
+                                )
                     _vprint("   ✓ Extracted ZIP file")
                 elif filename_lower.endswith('.7z'):
                     # Extract 7Z file
                     try:
                         import py7zr  # type: ignore[import]
                         with py7zr.SevenZipFile(dicom_path, mode='r') as archive:
+                            names = archive.getnames()
+                            archive_progress = None
+                            if progress_callback:
+                                archive_progress = ProgressTracker(
+                                    total=1,
+                                    phase="Extracting archive",
+                                    callback=progress_callback,
+                                )
+                                archive_progress.emit()
                             archive.extractall(extract_dir)
+                            if archive_progress:
+                                archive_progress.update(1, message=f"Extracted {len(names)} 7Z entries")
                         _vprint("   ✓ Extracted 7Z file")
                     except ImportError:
                         # Fallback to system 7z command
@@ -449,10 +529,19 @@ def process_directory(
     progress_file_units = 0
     if progress_callback:
         if dicom_path.is_file():
-            candidate_files = [dicom_path] if is_dicom_candidate(dicom_path) else []
+            candidate_files = [dicom_path] if is_dicom_candidate(
+                dicom_path,
+                max_file_bytes=max_file_bytes,
+                include_oversized=partial_read_oversized,
+            ) else []
             progress_base = dicom_path.parent
         else:
-            candidate_files = collect_dicom_files(dicom_path, recursive=True)
+            candidate_files = collect_dicom_files(
+                dicom_path,
+                recursive=True,
+                max_file_bytes=max_file_bytes,
+                include_oversized=partial_read_oversized,
+            )
             progress_base = dicom_path
         candidate_files, _progress_skipped_existing = _filter_existing_paths(
             candidate_files,
@@ -501,7 +590,11 @@ def process_directory(
 
     if dicom_path.is_file():
         _vprint(f"📄 Processing single file: {dicom_path.name}")
-        dcm_files = [dicom_path] if is_dicom_candidate(dicom_path) else []
+        dcm_files = [dicom_path] if is_dicom_candidate(
+            dicom_path,
+            max_file_bytes=max_file_bytes,
+            include_oversized=partial_read_oversized,
+        ) else []
         scan_root = scan_root_label or str(dicom_path.parent.resolve())
 
         if existing_paths:
@@ -539,6 +632,9 @@ def process_directory(
             insert_progress_callback=_advance_insertion_progress,
             parse_start_callback=_start_parsing,
             insert_start_callback=_start_insertion,
+            max_full_file_bytes=max_file_bytes,
+            partial_read_oversized=partial_read_oversized,
+            partial_read_limit_bytes=partial_read_limit_bytes,
         )
         extract_timings.update(run_timings)
         skipped_duplicates = skipped_existing + skipped_dup_insert
@@ -558,7 +654,13 @@ def process_directory(
             # Check if subdirectories contain DICOM files (generic check - works with any directory names)
             has_dicom_in_subdirs = False
             for subdir in subdirs:
-                if collect_dicom_files(subdir, recursive=True, limit=1):
+                if collect_dicom_files(
+                    subdir,
+                    recursive=True,
+                    limit=1,
+                    max_file_bytes=max_file_bytes,
+                    include_oversized=partial_read_oversized,
+                ):
                     has_dicom_in_subdirs = True
                     break
 
@@ -573,7 +675,12 @@ def process_directory(
                 total_existing_studies = 0
 
                 # First, check if there are DICOM files directly in the root directory
-                root_dcm_files = collect_dicom_files(dicom_path, recursive=False)
+                root_dcm_files = collect_dicom_files(
+                    dicom_path,
+                    recursive=False,
+                    max_file_bytes=max_file_bytes,
+                    include_oversized=partial_read_oversized,
+                )
 
                 if root_dcm_files:
                     _vprint(f"   [0/{len(subdirs)+1}] Processing root directory files ({len(root_dcm_files)} file(s))")
@@ -588,6 +695,9 @@ def process_directory(
                         insert_progress_callback=_advance_insertion_progress,
                         parse_start_callback=_start_parsing,
                         insert_start_callback=_start_insertion,
+                        max_file_bytes=max_file_bytes,
+                        partial_read_oversized=partial_read_oversized,
+                        partial_read_limit_bytes=partial_read_limit_bytes,
                     )
                     if timing and scan_timings:
                         _vprint("      ⏱️ scan timings:")
@@ -634,6 +744,9 @@ def process_directory(
                         insert_progress_callback=_advance_insertion_progress,
                         parse_start_callback=_start_parsing,
                         insert_start_callback=_start_insertion,
+                        max_file_bytes=max_file_bytes,
+                        partial_read_oversized=partial_read_oversized,
+                        partial_read_limit_bytes=partial_read_limit_bytes,
                     )
                     if timing and scan_timings:
                         _vprint("      ⏱️ scan timings:")
@@ -680,7 +793,12 @@ def process_directory(
             else:
                 # Process files directly (recursive)
                 _vprint(f"📂 Processing DICOM files in: {dicom_path} (recursive)")
-                dcm_files = collect_dicom_files(dicom_path, recursive=True)
+                dcm_files = collect_dicom_files(
+                    dicom_path,
+                    recursive=True,
+                    max_file_bytes=max_file_bytes,
+                    include_oversized=partial_read_oversized,
+                )
                 scan_root = scan_root_label or str(dicom_path.resolve())
 
                 dcm_files, skipped_existing = _filter_existing_paths(
@@ -710,6 +828,9 @@ def process_directory(
                     insert_progress_callback=_advance_insertion_progress,
                     parse_start_callback=_start_parsing,
                     insert_start_callback=_start_insertion,
+                    max_full_file_bytes=max_file_bytes,
+                    partial_read_oversized=partial_read_oversized,
+                    partial_read_limit_bytes=partial_read_limit_bytes,
                 )
                 extract_timings.update(run_timings)
                 skipped_duplicates = skipped_existing + skipped_dup_insert
@@ -723,7 +844,12 @@ def process_directory(
         else:
             # Process files directly (single directory or no subdirs)
             _vprint(f"📂 Processing DICOM files in: {dicom_path}")
-            dcm_files = collect_dicom_files(dicom_path, recursive=True)
+            dcm_files = collect_dicom_files(
+                dicom_path,
+                recursive=True,
+                max_file_bytes=max_file_bytes,
+                include_oversized=partial_read_oversized,
+            )
             scan_root = scan_root_label or str(dicom_path.resolve())
 
             dcm_files, skipped_existing = _filter_existing_paths(
@@ -759,6 +885,9 @@ def process_directory(
                 insert_progress_callback=_advance_insertion_progress,
                 parse_start_callback=_start_parsing,
                 insert_start_callback=_start_insertion,
+                max_full_file_bytes=max_file_bytes,
+                partial_read_oversized=partial_read_oversized,
+                partial_read_limit_bytes=partial_read_limit_bytes,
             )
             extract_timings.update(run_timings)
             skipped_duplicates = skipped_existing + skipped_dup_insert
@@ -859,6 +988,23 @@ if __name__ == "__main__":
         help="Maximum number of workers for metadata extraction (defaults to min(32, file count)).",
     )
     parser.add_argument(
+        "--max-file-mb",
+        type=float,
+        default=100.0,
+        help="Maximum file size to consider in MB. Use 0 for no size limit.",
+    )
+    parser.add_argument(
+        "--no-partial-oversized",
+        action="store_true",
+        help="Disable capped header-only reads for oversized DICOM-like files.",
+    )
+    parser.add_argument(
+        "--partial-read-mb",
+        type=float,
+        default=25.0,
+        help="Maximum MB to read from oversized files when partial reads are enabled.",
+    )
+    parser.add_argument(
         "--timing",
         action="store_true",
         help="Print elapsed time after processing completes.",
@@ -883,6 +1029,10 @@ if __name__ == "__main__":
 
     if args.max_workers is not None and args.max_workers < 1:
         parser.error("--max-workers must be greater than zero")
+    if args.max_file_mb < 0:
+        parser.error("--max-file-mb must be zero or greater")
+    if args.partial_read_mb <= 0:
+        parser.error("--partial-read-mb must be greater than zero")
 
     terminal_progress = TerminalProgress("process_dicom")
     process_directory(
@@ -894,5 +1044,8 @@ if __name__ == "__main__":
         verbose=args.verbose,
         skip_existing_paths=args.skip_existing_paths,
         auto_workers=not args.no_auto_workers,
+        max_file_bytes=max_file_mb_to_bytes(args.max_file_mb),
+        partial_read_oversized=not args.no_partial_oversized,
+        partial_read_limit_bytes=max_file_mb_to_bytes(args.partial_read_mb) or DEFAULT_PARTIAL_READ_BYTES,
         progress_callback=terminal_progress,
     )
