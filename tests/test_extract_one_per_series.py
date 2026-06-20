@@ -2,6 +2,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import py7zr
 
@@ -37,6 +38,28 @@ class ExtractOnePerSeriesTests(unittest.TestCase):
             self.assertTrue(events[-1]["done"])
             self.assertEqual(events[-1]["percent"], 100.0)
             self.assertIn("memory_mb", events[-1])
+
+    def test_extract_prefers_non_raw_candidate_within_series(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            input_root = base / "input"
+            output_root = base / "output"
+            series = input_root / "patient" / "study" / "series"
+            series.mkdir(parents=True)
+            raw_file = series / "a-raw.ima"
+            image_file = series / "b-image.ima"
+            raw_file.write_bytes(b"raw")
+            image_file.write_bytes(b"image")
+
+            with patch(
+                "extract_one_per_series.has_private_bulk_data",
+                side_effect=lambda path: path.name == raw_file.name,
+            ):
+                result = extract_one_per_series(input_root, output_root)
+
+            self.assertEqual(result["copied"], 1)
+            self.assertFalse((output_root / "patient" / "study" / "series" / raw_file.name).exists())
+            self.assertTrue((output_root / "patient" / "study" / "series" / image_file.name).exists())
 
     def test_extract_reports_done_when_no_dicom_files_exist(self):
         events = []

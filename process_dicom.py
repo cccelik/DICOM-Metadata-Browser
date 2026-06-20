@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from dicom_browser.archive_utils import safe_archive_member_path
 from dicom_browser.dicom_discovery import (
     DEFAULT_MAX_FILE_BYTES,
     collect_dicom_files,
@@ -23,6 +24,7 @@ from dicom_browser.dicom_discovery import (
     is_dicom_candidate,
     max_file_mb_to_bytes,
 )
+from dicom_browser.cli_paths import split_inputs_and_optional_db
 from dicom_browser.extract_metadata import DEFAULT_PARTIAL_READ_BYTES, extract_metadata_from_paths
 from dicom_browser.progress import ProgressCallback, ProgressTracker, TerminalProgress
 from dicom_browser.qa_utils import (
@@ -43,6 +45,7 @@ warnings.filterwarnings(
 BASE_DIR = Path(__file__).resolve().parent
 DATABANK_DIR = BASE_DIR / "Databanks"
 DEFAULT_DB_NAME = "dicom_metadata.db"
+
 
 def _parse_db_float(value: Optional[object]) -> Optional[float]:
     return shared_parse_db_float(value)
@@ -455,9 +458,7 @@ def process_directory(
                             )
                             archive_progress.emit()
                         for index, member in enumerate(members, start=1):
-                            member_path = (extract_dir / member.filename).resolve()
-                            if extract_dir.resolve() != member_path and extract_dir.resolve() not in member_path.parents:
-                                raise ValueError(f"Unsafe archive member path: {member.filename}")
+                            safe_archive_member_path(extract_dir, member.filename)
                             zip_ref.extract(member, extract_dir)
                             if archive_progress:
                                 archive_progress.update(
@@ -471,6 +472,8 @@ def process_directory(
                         import py7zr  # type: ignore[import]
                         with py7zr.SevenZipFile(dicom_path, mode='r') as archive:
                             names = archive.getnames()
+                            for name in names:
+                                safe_archive_member_path(extract_dir, name)
                             archive_progress = None
                             if progress_callback:
                                 archive_progress = ProgressTracker(
@@ -484,24 +487,14 @@ def process_directory(
                                 archive_progress.update(1, message=f"Extracted {len(names)} 7Z entries")
                         _vprint("   ✓ Extracted 7Z file")
                     except ImportError:
-                        # Fallback to system 7z command
-                        import subprocess
-                        result = subprocess.run(
-                            ['7z', 'x', str(dicom_path), '-o' + str(extract_dir), '-y'],
-                            capture_output=True,
-                            text=True
-                        )
-                        if result.returncode != 0:
-                            _vprint("   ✗ Error: Failed to extract 7Z file")
-                            _vprint("   Install py7zr: pip install py7zr")
-                            _vprint("   Or ensure system 7z command is available")
-                            try:
-                                shutil.rmtree(temp_extract_dir)
-                            except OSError:
-                                pass
-                            _print_timing()
-                            return
-                        _vprint("   ✓ Extracted 7Z file (using system 7z)")
+                        _vprint("   ✗ Error: Failed to extract 7Z file")
+                        _vprint("   Install py7zr: pip install py7zr")
+                        try:
+                            shutil.rmtree(temp_extract_dir)
+                        except OSError:
+                            pass
+                        _print_timing()
+                        return
                 extract_timings["archive_extract_s"] = time.perf_counter() - t_archive
 
                 # Update path to extracted directory
@@ -966,13 +959,17 @@ if __name__ == "__main__":
         description="Process DICOM files and store metadata in a SQLite database."
     )
     parser.add_argument(
-        "dicom_dir",
-        help="Directory or archive that contains DICOM files.",
+        "inputs",
+        nargs="+",
+        help=(
+            "Directory, archive, DICOM file, or wildcard pattern to process. "
+            "A final .db/.sqlite/.sqlite3 positional value is treated as the databank path."
+        ),
     )
     parser.add_argument(
-        "db_path",
-        nargs="?",
-        default=DEFAULT_DB_NAME,
+        "--db",
+        dest="db_path",
+        default=None,
         help=f"SQLite database path or name (defaults to Databanks/{DEFAULT_DB_NAME}).",
     )
     parser.add_argument(
@@ -1034,18 +1031,25 @@ if __name__ == "__main__":
     if args.partial_read_mb <= 0:
         parser.error("--partial-read-mb must be greater than zero")
 
+    input_paths, db_path = split_inputs_and_optional_db(args.inputs, args.db_path, DEFAULT_DB_NAME)
+    if not input_paths:
+        parser.error("No input paths matched")
+
     terminal_progress = TerminalProgress("process_dicom")
-    process_directory(
-        args.dicom_dir,
-        db_path=args.db_path,
-        process_subdirs=args.process_subdirs,
-        max_workers=args.max_workers,
-        timing=args.timing,
-        verbose=args.verbose,
-        skip_existing_paths=args.skip_existing_paths,
-        auto_workers=not args.no_auto_workers,
-        max_file_bytes=max_file_mb_to_bytes(args.max_file_mb),
-        partial_read_oversized=not args.no_partial_oversized,
-        partial_read_limit_bytes=max_file_mb_to_bytes(args.partial_read_mb) or DEFAULT_PARTIAL_READ_BYTES,
-        progress_callback=terminal_progress,
-    )
+    for index, input_path in enumerate(input_paths, start=1):
+        if len(input_paths) > 1:
+            print(f"\n=== Input {index}/{len(input_paths)}: {input_path} ===")
+        process_directory(
+            str(input_path),
+            db_path=db_path,
+            process_subdirs=args.process_subdirs,
+            max_workers=args.max_workers,
+            timing=args.timing,
+            verbose=args.verbose,
+            skip_existing_paths=args.skip_existing_paths,
+            auto_workers=not args.no_auto_workers,
+            max_file_bytes=max_file_mb_to_bytes(args.max_file_mb),
+            partial_read_oversized=not args.no_partial_oversized,
+            partial_read_limit_bytes=max_file_mb_to_bytes(args.partial_read_mb) or DEFAULT_PARTIAL_READ_BYTES,
+            progress_callback=terminal_progress,
+        )

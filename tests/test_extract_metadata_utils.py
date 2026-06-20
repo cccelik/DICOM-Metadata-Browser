@@ -133,7 +133,7 @@ class ExtractMetadataUtilsTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             dcm_path = Path(td) / "sample.dcm"
             dcm_path.write_bytes(b"DICM")
-            with patch.object(extract_metadata.pydicom, "dcmread", return_value=ds):
+            with patch.object(extract_metadata, "_read_dicom_dataset", return_value=ds):
                 meta = extract_metadata.extract_metadata(dcm_path)
 
         self.assertIsNotNone(meta)
@@ -158,7 +158,7 @@ class ExtractMetadataUtilsTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             dcm_path = Path(td) / "sample.dcm"
             dcm_path.write_bytes(b"DICM")
-            with patch.object(extract_metadata.pydicom, "dcmread", return_value=ds):
+            with patch.object(extract_metadata, "_read_dicom_dataset", return_value=ds):
                 meta = extract_metadata.extract_metadata(dcm_path)
 
         self.assertIsNotNone(meta)
@@ -174,7 +174,7 @@ class ExtractMetadataUtilsTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             dcm_path = Path(td) / "large.dcm"
             dcm_path.write_bytes(b"\x00" * 128 + b"DICM" + b"x" * 100)
-            with patch.object(extract_metadata.pydicom, "dcmread", return_value=ds) as dcmread:
+            with patch.object(extract_metadata, "read_partial", return_value=ds) as read_partial:
                 meta = extract_metadata.extract_metadata(
                     dcm_path,
                     max_full_file_bytes=10,
@@ -184,7 +184,16 @@ class ExtractMetadataUtilsTests(unittest.TestCase):
 
         self.assertIsNotNone(meta)
         self.assertEqual(meta.patient_id, "P1")
-        self.assertNotEqual(dcmread.call_args.args[0], dcm_path)
+        self.assertTrue(read_partial.called)
+        stop_when = read_partial.call_args.kwargs["stop_when"]
+        self.assertTrue(stop_when(Tag(0x7FE1, 0x1010), "OB", 90 * 1024 * 1024))
+
+    def test_bulk_data_boundary_detects_pixel_and_large_private_raw(self):
+        self.assertTrue(extract_metadata._is_bulk_data_boundary(Tag(0x7FE0, 0x0010), "OW", 1024))
+        self.assertTrue(extract_metadata._is_bulk_data_boundary(Tag(0x7FE1, 0x1010), "OB", 1024))
+        self.assertTrue(extract_metadata._is_bulk_data_boundary(Tag(0x0029, 0x1010), "OB", 9 * 1024 * 1024))
+        self.assertFalse(extract_metadata._is_bulk_data_boundary(Tag(0x0029, 0x1010), "OB", 4096))
+        self.assertFalse(extract_metadata._is_bulk_data_boundary(Tag(0x0010, 0x0010), "PN", 64))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ from typing import Dict, List, Optional
 
 import pydicom
 from pydicom.errors import InvalidDicomError
+from pydicom.filereader import read_partial
+from pydicom.tag import BaseTag, Tag
 
 from .progress import ProgressCallback, ProgressTracker
 
@@ -11,6 +13,9 @@ KNOWN_DICOM_EXTENSIONS = {".dcm", ".ima"}
 IGNORED_FILENAMES = {".ds_store"}
 ARCHIVE_EXTENSIONS = {".zip", ".7z"}
 DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024
+DEFAULT_PRIVATE_BULK_DATA_BYTES = 8 * 1024 * 1024
+PRIVATE_BULK_DATA_VRS = {"OB", "OD", "OF", "OL", "OV", "OW", "UN"}
+UNDEFINED_LENGTH = 0xFFFFFFFF
 
 
 def max_file_mb_to_bytes(value: Optional[float]) -> Optional[int]:
@@ -64,6 +69,42 @@ def can_parse_as_dicom(path: Path) -> bool:
         return True
     except (InvalidDicomError, OSError, PermissionError, ValueError):
         return False
+
+
+def is_private_bulk_data_boundary(
+    tag: BaseTag | int | tuple[int, int],
+    vr: Optional[str],
+    length: Optional[int],
+    large_binary_threshold: int = DEFAULT_PRIVATE_BULK_DATA_BYTES,
+) -> bool:
+    """Return True for private/vendor raw payload elements, not normal Pixel Data."""
+    element_tag = Tag(tag)
+    if element_tag.group >= 0x7FE1:
+        return True
+    if not element_tag.is_private or vr not in PRIVATE_BULK_DATA_VRS:
+        return False
+    if length in (None, UNDEFINED_LENGTH):
+        return True
+    return length >= large_binary_threshold
+
+
+def has_private_bulk_data(path: Path) -> bool:
+    """Detect DICOM files whose first bulk payload is private/vendor raw data."""
+    found_private_bulk = False
+
+    def _stop_when(tag: BaseTag, vr: Optional[str], length: int) -> bool:
+        nonlocal found_private_bulk
+        if is_private_bulk_data_boundary(tag, vr, length):
+            found_private_bulk = True
+            return True
+        return Tag(tag).group == 0x7FE0
+
+    try:
+        with path.open("rb") as fh:
+            read_partial(fh, stop_when=_stop_when, force=False)
+    except (EOFError, InvalidDicomError, OSError, PermissionError, ValueError):
+        return False
+    return found_private_bulk
 
 
 def is_dicom_candidate(

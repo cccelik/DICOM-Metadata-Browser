@@ -4,12 +4,12 @@ Extract one DICOM file per series, then process the sampled output into a databa
 """
 
 import argparse
-import re
 import time
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
-from dicom_browser.dicom_discovery import DEFAULT_MAX_FILE_BYTES, max_file_mb_to_bytes
+from dicom_browser.cli_paths import expand_path_patterns, safe_path_name, split_inputs_and_optional_db
+from dicom_browser.dicom_discovery import max_file_mb_to_bytes
 from dicom_browser.extract_metadata import DEFAULT_PARTIAL_READ_BYTES
 from dicom_browser.progress import TerminalProgress
 from extract_one_per_series import extract_one_per_series
@@ -19,22 +19,33 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SAMPLE_ROOT = BASE_DIR / "OnePerSeriesSamples"
 
 
-def _safe_name(value: str) -> str:
-    name = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
-    return name.strip("._") or "dicom_input"
-
-
 def _default_output_root(input_path: Path) -> Path:
     stem = input_path.stem if input_path.is_file() else input_path.name
-    base = DEFAULT_SAMPLE_ROOT / f"{_safe_name(stem)}_samples"
+    base = DEFAULT_SAMPLE_ROOT / f"{safe_path_name(stem)}_samples"
     if not base.exists():
         return base
     index = 2
     while True:
-        candidate = DEFAULT_SAMPLE_ROOT / f"{_safe_name(stem)}_samples_{index}"
+        candidate = DEFAULT_SAMPLE_ROOT / f"{safe_path_name(stem)}_samples_{index}"
         if not candidate.exists():
             return candidate
         index += 1
+
+
+def _resolve_inputs_output_and_db(args) -> Tuple[List[Path], Optional[Path], str]:
+    if (
+        args.db_path
+        and args.output_root is None
+        and len(args.inputs) >= 2
+        and not Path(args.inputs[-1]).expanduser().exists()
+    ):
+        candidate_inputs = expand_path_patterns(args.inputs[:-1])
+        if candidate_inputs and all(path.exists() for path in candidate_inputs):
+            return candidate_inputs, Path(args.inputs[-1]).expanduser().resolve(), args.db_path
+
+    input_paths, db_path = split_inputs_and_optional_db(args.inputs, args.db_path, DEFAULT_DB_NAME)
+    output_root = args.output_root.expanduser().resolve() if args.output_root else None
+    return input_paths, output_root, db_path
 
 
 def _parse_non_negative_mb(parser: argparse.ArgumentParser, value: float, option: str) -> Optional[int]:
@@ -54,13 +65,17 @@ def main() -> None:
         description="Run one-per-series extraction and DICOM metadata processing in one command."
     )
     parser.add_argument(
-        "input_path",
-        help="Input folder or ZIP archive containing DICOM data.",
+        "inputs",
+        nargs="+",
+        help=(
+            "Input folder, archive, or wildcard pattern containing DICOM data. "
+            "A final .db/.sqlite/.sqlite3 positional value is treated as the databank path."
+        ),
     )
     parser.add_argument(
-        "db_path",
-        nargs="?",
-        default=DEFAULT_DB_NAME,
+        "--db",
+        dest="db_path",
+        default=None,
         help=f"SQLite database path or name (defaults to Databanks/{DEFAULT_DB_NAME}).",
     )
     parser.add_argument(
@@ -126,53 +141,70 @@ def main() -> None:
     max_file_bytes = _parse_non_negative_mb(parser, args.max_file_mb, "--max-file-mb")
     partial_read_limit_bytes = _parse_positive_mb(parser, args.partial_read_mb, "--partial-read-mb")
 
-    input_path = Path(args.input_path).expanduser().resolve()
-    output_root = (args.output_root.expanduser().resolve() if args.output_root else _default_output_root(input_path))
+    input_paths, output_base, db_path = _resolve_inputs_output_and_db(args)
+    if not input_paths:
+        parser.error("No input paths matched")
 
-    start_time = time.perf_counter()
-    print(f"Input: {input_path}")
-    print(f"Sample output: {output_root}")
-    print(f"Databank: {args.db_path}")
+    total_start = time.perf_counter()
+    total_copied = 0
+    for index, input_path in enumerate(input_paths, start=1):
+        if len(input_paths) > 1:
+            print(f"\n=== Input {index}/{len(input_paths)}: {input_path} ===")
+        if output_base:
+            output_name = safe_path_name(input_path.stem if input_path.is_file() else input_path.name)
+            output_root = output_base if len(input_paths) == 1 else output_base / output_name
+        else:
+            output_root = _default_output_root(input_path)
 
-    extract_progress = TerminalProgress("extract_one_per_series")
-    extract_result = extract_one_per_series(
-        input_path,
-        output_root,
-        max_file_bytes=max_file_bytes,
-        progress_callback=extract_progress,
-    )
-    if extract_result["copied"] == 0:
-        print("No sampled DICOM files were extracted; skipping processing.")
+        start_time = time.perf_counter()
+        print(f"Input: {input_path}")
+        print(f"Sample output: {output_root}")
+        print(f"Databank: {db_path}")
+
+        extract_progress = TerminalProgress("extract_one_per_series")
+        extract_result = extract_one_per_series(
+            input_path,
+            output_root,
+            max_file_bytes=max_file_bytes,
+            progress_callback=extract_progress,
+        )
+        if extract_result["copied"] == 0:
+            print("No sampled DICOM files were extracted; skipping processing.")
+            extract_elapsed = time.perf_counter() - start_time
+            print(f"Extract elapsed time: {extract_elapsed:.2f} seconds")
+            print("Process elapsed time: 0.00 seconds")
+            print(f"Total elapsed time (extract + process): {extract_elapsed:.2f} seconds")
+            continue
+
+        total_copied += extract_result["copied"]
         extract_elapsed = time.perf_counter() - start_time
+        print(f"Extracted {extract_result['copied']} sampled files. Starting metadata processing...")
+        process_progress = TerminalProgress("process_dicom")
+        process_start = time.perf_counter()
+        process_directory(
+            str(output_root),
+            db_path=db_path,
+            process_subdirs=args.process_subdirs,
+            max_workers=args.max_workers,
+            timing=args.timing,
+            verbose=args.verbose,
+            skip_existing_paths=args.skip_existing_paths,
+            auto_workers=not args.no_auto_workers,
+            max_file_bytes=max_file_bytes,
+            partial_read_oversized=not args.no_partial_oversized,
+            partial_read_limit_bytes=partial_read_limit_bytes,
+            print_elapsed_summary=False,
+            progress_callback=process_progress,
+        )
+        process_elapsed = time.perf_counter() - process_start
+        elapsed = time.perf_counter() - start_time
         print(f"Extract elapsed time: {extract_elapsed:.2f} seconds")
-        print("Process elapsed time: 0.00 seconds")
-        print(f"Total elapsed time (extract + process): {extract_elapsed:.2f} seconds")
-        return
+        print(f"Process elapsed time: {process_elapsed:.2f} seconds")
+        print(f"Total elapsed time (extract + process): {elapsed:.2f} seconds")
 
-    extract_elapsed = time.perf_counter() - start_time
-    print(f"Extracted {extract_result['copied']} sampled files. Starting metadata processing...")
-    process_progress = TerminalProgress("process_dicom")
-    process_start = time.perf_counter()
-    process_directory(
-        str(output_root),
-        db_path=args.db_path,
-        process_subdirs=args.process_subdirs,
-        max_workers=args.max_workers,
-        timing=args.timing,
-        verbose=args.verbose,
-        skip_existing_paths=args.skip_existing_paths,
-        auto_workers=not args.no_auto_workers,
-        max_file_bytes=max_file_bytes,
-        partial_read_oversized=not args.no_partial_oversized,
-        partial_read_limit_bytes=partial_read_limit_bytes,
-        print_elapsed_summary=False,
-        progress_callback=process_progress,
-    )
-    process_elapsed = time.perf_counter() - process_start
-    total_elapsed = time.perf_counter() - start_time
-    print(f"Extract elapsed time: {extract_elapsed:.2f} seconds")
-    print(f"Process elapsed time: {process_elapsed:.2f} seconds")
-    print(f"Total elapsed time (extract + process): {total_elapsed:.2f} seconds")
+    if len(input_paths) > 1:
+        print(f"\nProcessed {len(input_paths)} input(s), copied {total_copied} sampled file(s).")
+        print(f"Total elapsed time: {time.perf_counter() - total_start:.2f} seconds")
 
 
 if __name__ == "__main__":

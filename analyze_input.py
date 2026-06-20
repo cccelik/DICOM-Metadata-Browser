@@ -3,8 +3,8 @@
 
 import argparse
 import json
-from pathlib import Path
 
+from dicom_browser.cli_paths import expand_path_patterns
 from dicom_browser.dicom_discovery import (
     analyze_7z_size,
     analyze_input_size,
@@ -39,7 +39,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Analyze DICOM input size and estimate oversized/raw-like data."
     )
-    parser.add_argument("input_path", help="Input folder, file, or ZIP archive to analyze.")
+    parser.add_argument(
+        "input_paths",
+        nargs="+",
+        help="Input folder, file, ZIP/7Z archive, or wildcard pattern to analyze.",
+    )
     parser.add_argument(
         "--max-file-mb",
         type=float,
@@ -55,22 +59,31 @@ def main() -> None:
     if args.max_file_mb < 0:
         parser.error("--max-file-mb must be zero or greater")
 
-    input_path = Path(args.input_path).expanduser().resolve()
+    input_paths = expand_path_patterns(args.input_paths)
+    if not input_paths:
+        parser.error("No input paths matched")
     max_file_bytes = max_file_mb_to_bytes(args.max_file_mb)
-    progress = TerminalProgress("analyze_input")
-    if input_path.is_file() and input_path.suffix.lower() == ".zip":
-        analysis = analyze_zip_size(input_path, max_file_bytes=max_file_bytes, progress_callback=progress)
-    elif input_path.is_file() and input_path.suffix.lower() == ".7z":
-        analysis = analyze_7z_size(input_path, max_file_bytes=max_file_bytes, progress_callback=progress)
-    else:
-        analysis = analyze_input_size(input_path, max_file_bytes=max_file_bytes, progress_callback=progress)
+    analyses = []
+    for index, input_path in enumerate(input_paths, start=1):
+        if len(input_paths) > 1 and not args.json:
+            print(f"\n=== Input {index}/{len(input_paths)}: {input_path} ===")
+        progress = TerminalProgress("analyze_input")
+        if input_path.is_file() and input_path.suffix.lower() == ".zip":
+            analysis = analyze_zip_size(input_path, max_file_bytes=max_file_bytes, progress_callback=progress)
+        elif input_path.is_file() and input_path.suffix.lower() == ".7z":
+            analysis = analyze_7z_size(input_path, max_file_bytes=max_file_bytes, progress_callback=progress)
+        else:
+            analysis = analyze_input_size(input_path, max_file_bytes=max_file_bytes, progress_callback=progress)
 
-    if not analysis.get("exists"):
-        raise SystemExit(str(analysis.get("message", "Input path does not exist.")))
+        if not analysis.get("exists"):
+            raise SystemExit(str(analysis.get("message", "Input path does not exist.")))
+        analyses.append(analysis)
     if args.json:
-        print(json.dumps(analysis, indent=2))
+        payload = analyses[0] if len(analyses) == 1 else analyses
+        print(json.dumps(payload, indent=2))
     else:
-        _print_summary(analysis)
+        for analysis in analyses:
+            _print_summary(analysis)
 
 
 if __name__ == "__main__":

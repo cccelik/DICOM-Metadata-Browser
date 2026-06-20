@@ -18,10 +18,15 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pydicom  # type: ignore[import]
 from pydicom.errors import InvalidDicomError
+from pydicom.filereader import read_partial
+from pydicom.tag import BaseTag, Tag
 
 from .dicom_discovery import DEFAULT_MAX_FILE_BYTES, collect_dicom_files, is_metadata_artifact
 
 DEFAULT_PARTIAL_READ_BYTES = 25 * 1024 * 1024
+DEFAULT_BULK_DATA_ELEMENT_BYTES = 8 * 1024 * 1024
+BULK_DATA_VRS = {"OB", "OD", "OF", "OL", "OV", "OW", "UN"}
+UNDEFINED_LENGTH = 0xFFFFFFFF
 
 
 @dataclass
@@ -204,6 +209,23 @@ def _truncate_hex(raw: bytes, max_bytes: int = 256) -> str:
     if len(raw) <= max_bytes:
         return raw.hex()
     return raw[:max_bytes].hex() + f"...(len={len(raw)})"
+
+
+def _is_bulk_data_boundary(
+    tag: BaseTag | int | Tuple[int, int],
+    vr: Optional[str],
+    length: Optional[int],
+    large_binary_threshold: int = DEFAULT_BULK_DATA_ELEMENT_BYTES,
+) -> bool:
+    """Return True when a data element is likely the start of bulk/raw payload."""
+    element_tag = Tag(tag)
+    if element_tag.group >= 0x7FE0:
+        return True
+    if vr not in BULK_DATA_VRS:
+        return False
+    if length in (None, UNDEFINED_LENGTH):
+        return True
+    return length >= large_binary_threshold
 
 
 def _build_private_creator_map(ds: pydicom.Dataset) -> Dict[int, Dict[int, str]]:
@@ -449,6 +471,9 @@ def _read_dicom_dataset(
     partial_read_oversized: bool = True,
     partial_read_limit_bytes: int = DEFAULT_PARTIAL_READ_BYTES,
 ):
+    def _stop_at_bulk_data(tag: BaseTag, vr: Optional[str], length: int) -> bool:
+        return _is_bulk_data_boundary(tag, vr, length)
+
     oversized = False
     if max_full_file_bytes:
         try:
@@ -457,15 +482,28 @@ def _read_dicom_dataset(
             oversized = False
 
     if oversized and partial_read_oversized:
-        with dcm_path.open("rb") as fh:
-            data = fh.read(max(132, partial_read_limit_bytes))
-        return pydicom.dcmread(
-            io.BytesIO(data),
-            stop_before_pixels=True,
+        try:
+            with dcm_path.open("rb") as fh:
+                return read_partial(
+                    fh,
+                    stop_when=_stop_at_bulk_data,
+                    force=False,
+                )
+        except EOFError:
+            with dcm_path.open("rb") as fh:
+                data = fh.read(max(132, partial_read_limit_bytes))
+            return pydicom.dcmread(
+                io.BytesIO(data),
+                stop_before_pixels=True,
+                force=False,
+            )
+
+    with dcm_path.open("rb") as fh:
+        return read_partial(
+            fh,
+            stop_when=_stop_at_bulk_data,
             force=False,
         )
-
-    return pydicom.dcmread(dcm_path, stop_before_pixels=True, force=False)
 
 
 def extract_metadata(
@@ -752,9 +790,9 @@ def main() -> None:
         description="Extract metadata from DICOM files in a directory."
     )
     parser.add_argument(
-        "directory",
-        type=Path,
-        help="Directory (or archive root) containing DICOM files.",
+        "directories",
+        nargs="+",
+        help="Directory, archive root, or wildcard pattern containing DICOM files.",
     )
     parser.add_argument(
         "-m",
@@ -782,10 +820,19 @@ def main() -> None:
         parser.error("--max-workers must be greater than zero")
 
     start = time.perf_counter() if args.timing else None
-    metadata = extract_all_metadata(
-        args.directory,
-        max_workers=args.max_workers,
-    )
+    from dicom_browser.cli_paths import expand_path_patterns
+
+    metadata: List[Tuple[Path, DICOMMetadata]] = []
+    directories = expand_path_patterns(args.directories)
+    if not directories:
+        parser.error("No input paths matched")
+    for directory in directories:
+        metadata.extend(
+            extract_all_metadata(
+                directory,
+                max_workers=args.max_workers,
+            )
+        )
     if args.timing and start is not None:
         elapsed = time.perf_counter() - start
         print(f"Processed {len(metadata)} DICOM file(s) in {elapsed:.2f}s")

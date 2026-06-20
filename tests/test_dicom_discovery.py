@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import py7zr
+from pydicom.tag import Tag
 
 from dicom_browser import dicom_discovery
 
@@ -153,6 +154,44 @@ class DicomDiscoveryTests(unittest.TestCase):
             license_file = base / "LICENSE"
             license_file.write_text("License\nThis is not a DICOM file.")
             self.assertFalse(dicom_discovery.is_dicom_candidate(license_file))
+
+    def test_private_bulk_data_boundary_ignores_normal_pixel_data(self):
+        self.assertTrue(
+            dicom_discovery.is_private_bulk_data_boundary(Tag(0x7FE1, 0x1010), "OB", 90 * 1024 * 1024)
+        )
+        self.assertTrue(
+            dicom_discovery.is_private_bulk_data_boundary(Tag(0x0029, 0x1010), "OB", 9 * 1024 * 1024)
+        )
+        self.assertFalse(
+            dicom_discovery.is_private_bulk_data_boundary(Tag(0x7FE0, 0x0010), "OW", 90 * 1024 * 1024)
+        )
+        self.assertFalse(
+            dicom_discovery.is_private_bulk_data_boundary(Tag(0x0029, 0x1010), "OB", 4096)
+        )
+
+    def test_has_private_bulk_data_reports_private_raw_before_pixel_data(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "raw.ima"
+            path.write_bytes(b"\x00" * 128 + b"DICM")
+
+            def fake_read_partial(_fh, stop_when=None, force=False):
+                self.assertFalse(force)
+                self.assertTrue(stop_when(Tag(0x7FE1, 0x1010), "OB", 90 * 1024 * 1024))
+
+            with patch("dicom_browser.dicom_discovery.read_partial", side_effect=fake_read_partial):
+                self.assertTrue(dicom_discovery.has_private_bulk_data(path))
+
+    def test_has_private_bulk_data_returns_false_for_normal_pixel_data(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "image.dcm"
+            path.write_bytes(b"\x00" * 128 + b"DICM")
+
+            def fake_read_partial(_fh, stop_when=None, force=False):
+                self.assertFalse(force)
+                self.assertTrue(stop_when(Tag(0x7FE0, 0x0010), "OW", 90 * 1024 * 1024))
+
+            with patch("dicom_browser.dicom_discovery.read_partial", side_effect=fake_read_partial):
+                self.assertFalse(dicom_discovery.has_private_bulk_data(path))
 
 
 if __name__ == "__main__":

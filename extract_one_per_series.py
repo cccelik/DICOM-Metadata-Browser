@@ -13,8 +13,11 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
+from dicom_browser.archive_utils import safe_archive_member_path
+from dicom_browser.cli_paths import expand_path_patterns, safe_path_name
 from dicom_browser.dicom_discovery import (
     DEFAULT_MAX_FILE_BYTES,
+    has_private_bulk_data,
     is_dicom_candidate,
     max_file_mb_to_bytes,
 )
@@ -58,9 +61,7 @@ def _safe_extract_archive(
             if progress:
                 progress.update(0, total=max(len(members), 1), phase="Extracting", message=f"Extracting {archive_path.name}")
             for index, member in enumerate(members, start=1):
-                member_path = (output_dir / member.filename).resolve()
-                if output_dir != member_path and output_dir not in member_path.parents:
-                    raise ValueError(f"Unsafe archive member path: {member.filename}")
+                safe_archive_member_path(output_dir, member.filename)
                 archive.extract(member, output_dir)
                 if progress:
                     progress.update(index, message=f"Extracted {index}/{len(members)} archive entries")
@@ -69,9 +70,7 @@ def _safe_extract_archive(
         import py7zr  # type: ignore[import]
         with py7zr.SevenZipFile(archive_path, mode="r") as archive:
             for name in archive.getnames():
-                member_path = (output_dir / name).resolve()
-                if output_dir != member_path and output_dir not in member_path.parents:
-                    raise ValueError(f"Unsafe archive member path: {name}")
+                safe_archive_member_path(output_dir, name)
             names = archive.getnames()
             if progress:
                 progress.update(0, total=1, phase="Extracting", message=f"Extracting {len(names)} 7Z entries")
@@ -99,13 +98,14 @@ def find_series_samples(
         for name in filenames:
             file_path = Path(dirpath) / name
             if is_dicom_candidate(file_path, max_file_bytes=max_file_bytes):
-                dicom_files.append(name)
+                dicom_files.append(file_path)
         if not dicom_files:
             if progress:
                 progress.update(index, message=f"Found {len(samples)} series")
             continue
-        dicom_files.sort()
-        samples.append(Path(dirpath) / dicom_files[0])
+        dicom_files.sort(key=lambda path: path.name)
+        preferred_files = [path for path in dicom_files if not has_private_bulk_data(path)]
+        samples.append((preferred_files or dicom_files)[0])
         if progress:
             progress.update(index, message=f"Found {len(samples)} series")
     return samples
@@ -211,8 +211,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Extract one DICOM file per series directory from a folder, ZIP archive, or 7Z archive."
     )
-    parser.add_argument("input_root", help="Root directory, ZIP archive, or 7Z archive containing DICOM series")
-    parser.add_argument("output_root", help="Directory to write the sampled DICOMs")
+    parser.add_argument(
+        "paths",
+        nargs="+",
+        help=(
+            "One or more input roots, archives, or wildcard patterns followed by the output directory. "
+            "Example: extract_one_per_series.py \"USB1?\" samples"
+        ),
+    )
     parser.add_argument(
         "--max-file-mb",
         type=float,
@@ -222,26 +228,40 @@ def main() -> None:
     args = parser.parse_args()
     if args.max_file_mb < 0:
         parser.error("--max-file-mb must be zero or greater")
+    if len(args.paths) < 2:
+        parser.error("Provide at least one input path and an output directory")
 
-    input_root = Path(args.input_root).resolve()
-    output_root = Path(args.output_root).resolve()
+    input_roots = expand_path_patterns(args.paths[:-1])
+    output_root = Path(args.paths[-1]).expanduser().resolve()
+    if not input_roots:
+        parser.error("No input paths matched")
 
-    if not input_root.is_dir() and not _is_supported_archive(input_root):
-        raise SystemExit(f"Input root is not a directory, ZIP archive, or 7Z archive: {input_root}")
+    total_copied = 0
+    for index, input_root in enumerate(input_roots, start=1):
+        if len(input_roots) > 1:
+            print(f"\n=== Input {index}/{len(input_roots)}: {input_root} ===")
+        if not input_root.is_dir() and not _is_supported_archive(input_root):
+            raise SystemExit(f"Input root is not a directory, ZIP archive, or 7Z archive: {input_root}")
 
-    terminal_progress = TerminalProgress("extract_one_per_series")
-    result = extract_one_per_series(
-        input_root,
-        output_root,
-        max_file_bytes=max_file_mb_to_bytes(args.max_file_mb),
-        progress_callback=terminal_progress,
-    )
-    if result["copied"] == 0:
+        target_root = output_root
+        if len(input_roots) > 1:
+            target_root = output_root / safe_path_name(input_root.stem if input_root.is_file() else input_root.name)
+
+        terminal_progress = TerminalProgress("extract_one_per_series")
+        result = extract_one_per_series(
+            input_root,
+            target_root,
+            max_file_bytes=max_file_mb_to_bytes(args.max_file_mb),
+            progress_callback=terminal_progress,
+        )
+        if result["copied"] == 0:
+            print("No DICOM files found.")
+            continue
+        total_copied += result["copied"]
+        print(f"Copied {result['copied']} series samples into {target_root}")
+
+    if total_copied == 0:
         print("No DICOM files found.")
-        print(f"Elapsed time: {time.perf_counter() - start_time:.2f} seconds")
-        return
-
-    print(f"Copied {result['copied']} series samples into {output_root}")
     print(f"Elapsed time: {time.perf_counter() - start_time:.2f} seconds")
 
 

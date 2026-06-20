@@ -48,7 +48,8 @@ Open `http://127.0.0.1:5001`.
 ### Main processor
 
 ```text
-python3 process_dicom.py <input_path> [db_name_or_path]
+python3 process_dicom.py <input_path_or_pattern> [more_inputs...] [db_name_or_path]
+  --db DB                Explicit SQLite database path/name for multi-input runs
   --no-subdirs           Treat input as one scan (no scan-folder discovery)
   --max-workers N        Set worker processes
   --max-file-mb MB       Full-parse files up to this size; 0 disables the size limit
@@ -81,7 +82,17 @@ python3 process_dicom.py /path/to/file dicom_metadata.db
 
 # Network folder with huge raw-data files
 python3 process_dicom.py /path/to/dicom_dir dicom_metadata.db --max-file-mb 100 --partial-read-mb 25
+
+# Wildcard ingest. Quote the pattern so the script expands it consistently.
+python3 process_dicom.py "/path/to/USB1?" wildcard.db
+python3 process_dicom.py "/path/to/USB1*" --db wildcard.db
 ```
+
+Wildcard patterns are supported by the command-line ingestion tools
+(`process_dicom.py`, `extract_one_per_series.py`, `extract_and_process.py`,
+`analyze_input.py`, and `python3 -m dicom_browser.extract_metadata`). Use `*`
+and `?` for portable matching. In zsh, quote patterns that contain `!` or avoid
+`!` entirely because history expansion happens before Python starts.
 
 Large-file behavior:
 
@@ -106,12 +117,13 @@ The analyzer reports total size, DICOM candidates, oversized DICOM-like data, es
 
 ```bash
 python3 extract_and_process.py /path/to/input_root dicom_metadata.db
+python3 extract_and_process.py /path/to/input_root /path/to/sample_output --db dicom_metadata.db
 python3 extract_and_process.py /path/to/archive.zip dicom_metadata.db --output-root OnePerSeriesSamples/archive_samples
 python3 extract_and_process.py /path/to/archive.7z dicom_metadata.db --output-root OnePerSeriesSamples/archive_samples
 python3 extract_and_process.py /path/to/input_root dicom_metadata.db --max-file-mb 100 --partial-read-mb 25
 ```
 
-This wrapper first runs one-per-series extraction, then processes the sampled output folder into the target databank. If `--output-root` is omitted, a unique folder is created under `OnePerSeriesSamples/`. The wrapper accepts the same large-file processing defaults as the main processor: full parse up to `100 MB`, oversized header-only read up to `25 MB`, and partial oversized reads enabled unless `--no-partial-oversized` is provided.
+This wrapper first runs one-per-series extraction, then processes the sampled output folder into the target databank. If `--output-root` is omitted and no positional sample output is provided, a unique folder is created under `OnePerSeriesSamples/`. The wrapper accepts the same large-file processing defaults as the main processor: full parse up to `100 MB`, oversized header-only read up to `25 MB`, and partial oversized reads enabled unless `--no-partial-oversized` is provided.
 
 The wrapper prints three timing lines: extract elapsed time, process elapsed time, and total wall-clock time for extraction plus processing.
 
