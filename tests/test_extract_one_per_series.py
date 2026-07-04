@@ -61,6 +61,66 @@ class ExtractOnePerSeriesTests(unittest.TestCase):
             self.assertFalse((output_root / "patient" / "study" / "series" / raw_file.name).exists())
             self.assertTrue((output_root / "patient" / "study" / "series" / image_file.name).exists())
 
+    def test_extract_stops_private_bulk_checks_after_first_usable_candidate(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            input_root = base / "input"
+            output_root = base / "output"
+            series = input_root / "patient" / "study" / "series"
+            series.mkdir(parents=True)
+            first_file = series / "a-image.ima"
+            later_file = series / "b-image.ima"
+            first_file.write_bytes(b"image")
+            later_file.write_bytes(b"image")
+
+            with patch("extract_one_per_series.has_private_bulk_data", return_value=False) as has_bulk_data:
+                result = extract_one_per_series(input_root, output_root)
+
+            self.assertEqual(result["copied"], 1)
+            self.assertEqual(has_bulk_data.call_count, 1)
+            self.assertEqual(has_bulk_data.call_args.args[0].resolve(), first_file.resolve())
+            self.assertTrue((output_root / "patient" / "study" / "series" / first_file.name).exists())
+
+    def test_extract_debug_callback_reports_directory_only(self):
+        messages = []
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            input_root = base / "input"
+            output_root = base / "output"
+            series = input_root / "patient" / "study" / "series"
+            series.mkdir(parents=True)
+            sample_file = series / "a-image.ima"
+            sample_file.write_bytes(b"image")
+
+            with patch("extract_one_per_series.has_private_bulk_data", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    extract_one_per_series(input_root, output_root, debug_callback=messages.append)
+
+            self.assertTrue(
+                any(f"Directory 4: {series.resolve()}" in message for message in messages)
+            )
+            self.assertFalse(any("Checking private bulk data" in message for message in messages))
+            self.assertFalse(any("Selected sample" in message for message in messages))
+
+    def test_extract_log_callback_reports_file_before_private_bulk_check(self):
+        messages = []
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            input_root = base / "input"
+            output_root = base / "output"
+            series = input_root / "patient" / "study" / "series"
+            series.mkdir(parents=True)
+            sample_file = series / "a-image.ima"
+            sample_file.write_bytes(b"image")
+
+            with patch("extract_one_per_series.has_private_bulk_data", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    extract_one_per_series(input_root, output_root, log_callback=messages.append)
+
+            self.assertTrue(
+                any(f"Checking private bulk data 1/1: {sample_file.resolve()}" in message for message in messages)
+            )
+
     def test_extract_reports_done_when_no_dicom_files_exist(self):
         events = []
         with tempfile.TemporaryDirectory() as td:

@@ -7,11 +7,12 @@ Series is inferred as the directory that directly contains DICOM files.
 import argparse
 import os
 import shutil
+import sys
 import tempfile
 import time
 import zipfile
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional, TextIO
 
 from dicom_browser.archive_utils import safe_archive_member_path
 from dicom_browser.cli_paths import expand_path_patterns, safe_path_name
@@ -24,6 +25,7 @@ from dicom_browser.dicom_discovery import (
 from dicom_browser.progress import ProgressCallback, ProgressTracker, TerminalProgress
 
 SUPPORTED_ARCHIVE_SUFFIXES = {".zip", ".7z"}
+DebugCallback = Callable[[str], None]
 
 
 def _copy_api_path(path: Path) -> str:
@@ -47,6 +49,20 @@ def _count_directories(input_root: Path) -> int:
 
 def _is_supported_archive(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in SUPPORTED_ARCHIVE_SUFFIXES
+
+
+def _build_diagnostic_callback(
+    *,
+    stream: Optional[TextIO] = None,
+) -> Optional[DebugCallback]:
+    if stream is None:
+        return None
+
+    def _debug(message: str) -> None:
+        line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}"
+        print(line, file=stream, flush=True)
+
+    return _debug
 
 
 def _safe_extract_archive(
@@ -91,6 +107,8 @@ def find_series_samples(
     input_root: Path,
     progress: Optional[ProgressTracker] = None,
     max_file_bytes: Optional[int] = DEFAULT_MAX_FILE_BYTES,
+    debug_callback: Optional[DebugCallback] = None,
+    log_callback: Optional[DebugCallback] = None,
 ):
     samples = []
     for index, (dirpath, _dirnames, filenames) in enumerate(os.walk(input_root), start=1):
@@ -104,8 +122,28 @@ def find_series_samples(
                 progress.update(index, message=f"Found {len(samples)} series")
             continue
         dicom_files.sort(key=lambda path: path.name)
-        preferred_files = [path for path in dicom_files if not has_private_bulk_data(path)]
-        samples.append((preferred_files or dicom_files)[0])
+        if debug_callback:
+            debug_callback(f"Directory {index}: {dirpath}")
+        if log_callback:
+            log_callback(f"Directory {index}: {dirpath} has {len(dicom_files)} DICOM candidate(s)")
+        sample = dicom_files[0]
+        for file_index, path in enumerate(dicom_files, start=1):
+            if log_callback:
+                log_callback(f"Checking private bulk data {file_index}/{len(dicom_files)}: {path}")
+            check_start = time.perf_counter()
+            has_bulk_data = has_private_bulk_data(path)
+            if log_callback:
+                elapsed = time.perf_counter() - check_start
+                log_callback(
+                    f"Private bulk data check finished in {elapsed:.3f}s "
+                    f"({'private bulk data' if has_bulk_data else 'usable'}): {path}"
+                )
+            if not has_bulk_data:
+                sample = path
+                break
+        if log_callback:
+            log_callback(f"Selected sample: {sample}")
+        samples.append(sample)
         if progress:
             progress.update(index, message=f"Found {len(samples)} series")
     return samples
@@ -141,6 +179,8 @@ def extract_one_per_series(
     output_root: Path,
     max_file_bytes: Optional[int] = DEFAULT_MAX_FILE_BYTES,
     progress_callback: Optional[ProgressCallback] = None,
+    debug_callback: Optional[DebugCallback] = None,
+    log_callback: Optional[DebugCallback] = None,
 ) -> dict:
     start_time = time.perf_counter()
     input_root = input_root.expanduser().resolve()
@@ -173,7 +213,13 @@ def extract_one_per_series(
             callback=progress_callback,
         )
         progress.emit()
-        samples = find_series_samples(input_root, progress, max_file_bytes=max_file_bytes)
+        samples = find_series_samples(
+            input_root,
+            progress,
+            max_file_bytes=max_file_bytes,
+            debug_callback=debug_callback,
+            log_callback=log_callback,
+        )
 
         if not samples:
             progress.finish("No DICOM files found")
@@ -225,6 +271,16 @@ def main() -> None:
         default=100.0,
         help="Maximum file size to consider in MB. Use 0 for no size limit.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print the directory currently being scanned to stderr.",
+    )
+    parser.add_argument(
+        "--log",
+        type=Path,
+        help="Write detailed per-directory and per-file diagnostic messages to this log file.",
+    )
     args = parser.parse_args()
     if args.max_file_mb < 0:
         parser.error("--max-file-mb must be zero or greater")
@@ -237,28 +293,43 @@ def main() -> None:
         parser.error("No input paths matched")
 
     total_copied = 0
-    for index, input_root in enumerate(input_roots, start=1):
-        if len(input_roots) > 1:
-            print(f"\n=== Input {index}/{len(input_roots)}: {input_root} ===")
-        if not input_root.is_dir() and not _is_supported_archive(input_root):
-            raise SystemExit(f"Input root is not a directory, ZIP archive, or 7Z archive: {input_root}")
+    log_file = None
+    try:
+        if args.log:
+            log_file = args.log.expanduser().open("a", encoding="utf-8")
+        debug_callback = _build_diagnostic_callback(stream=sys.stderr if args.debug else None)
+        log_callback = _build_diagnostic_callback(stream=log_file)
+        if debug_callback:
+            debug_callback("Starting extract_one_per_series directory debug")
+        if log_callback:
+            log_callback("Starting extract_one_per_series detailed diagnostics")
+        for index, input_root in enumerate(input_roots, start=1):
+            if len(input_roots) > 1:
+                print(f"\n=== Input {index}/{len(input_roots)}: {input_root} ===")
+            if not input_root.is_dir() and not _is_supported_archive(input_root):
+                raise SystemExit(f"Input root is not a directory, ZIP archive, or 7Z archive: {input_root}")
 
-        target_root = output_root
-        if len(input_roots) > 1:
-            target_root = output_root / safe_path_name(input_root.stem if input_root.is_file() else input_root.name)
+            target_root = output_root
+            if len(input_roots) > 1:
+                target_root = output_root / safe_path_name(input_root.stem if input_root.is_file() else input_root.name)
 
-        terminal_progress = TerminalProgress("extract_one_per_series")
-        result = extract_one_per_series(
-            input_root,
-            target_root,
-            max_file_bytes=max_file_mb_to_bytes(args.max_file_mb),
-            progress_callback=terminal_progress,
-        )
-        if result["copied"] == 0:
-            print("No DICOM files found.")
-            continue
-        total_copied += result["copied"]
-        print(f"Copied {result['copied']} series samples into {target_root}")
+            terminal_progress = TerminalProgress("extract_one_per_series")
+            result = extract_one_per_series(
+                input_root,
+                target_root,
+                max_file_bytes=max_file_mb_to_bytes(args.max_file_mb),
+                progress_callback=terminal_progress,
+                debug_callback=debug_callback,
+                log_callback=log_callback,
+            )
+            if result["copied"] == 0:
+                print("No DICOM files found.")
+                continue
+            total_copied += result["copied"]
+            print(f"Copied {result['copied']} series samples into {target_root}")
+    finally:
+        if log_file is not None:
+            log_file.close()
 
     if total_copied == 0:
         print("No DICOM files found.")
